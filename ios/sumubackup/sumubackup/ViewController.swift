@@ -17,13 +17,21 @@ import Photos
 class ViewController: UIViewController {
     
     @IBOutlet weak var statusMessage: UILabel!
+    @IBOutlet weak var albumField: UITextField!
+    @IBOutlet weak var uploadButton: UIButton!
+    @IBOutlet weak var previewImage: UIImageView!
     
     var images = [UIImage]()
-    var results: PHFetchResult<PHAsset>?
+    var results: PHFetchResult<PHAsset>? {
+        didSet {
+            if results != nil {
+                uploadButton.isEnabled = true
+            }
+        }
+    }
     var failedUploadCount: Int = 0
     
     var user: String = "vicky"
-    var album: String = "default"
     
     let WELCOME_MSG = "Click the buttons below to get started!"
     let FOUND_IMAGES_MSG = "Found {total} images that have not been uploaded to vingilot. Press Upload to upload them."
@@ -39,6 +47,7 @@ class ViewController: UIViewController {
     let PROD_CHECK_URL = "http://0.0.0.0:9090/check"
     
     let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
+    let DEFAULT_ALBUM_NAME = "default"
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -63,6 +72,10 @@ class ViewController: UIViewController {
     }
     
     func startUpload() {
+        if results == nil {
+            return
+        }
+
         let manager = PHImageManager.default()
         let requestOptions = PHImageRequestOptions()
         requestOptions.isSynchronous = true
@@ -84,6 +97,9 @@ class ViewController: UIViewController {
             let f = asset.isFavorite
 
             manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
+                DispatchQueue.main.async {
+                    self.previewImage.image = img
+                }
                 self.upload(img: img!, count: i + 1, total: self.results!.count, timestamp: t, latitude: lat, longitude: long, isFavorite: f)
             }
         }
@@ -99,7 +115,7 @@ class ViewController: UIViewController {
         req.httpMethod = "POST"
         let imgBase64 = img.pngData()?.base64EncodedString()
         let jsonObj: [String: Any?] = [
-            "a": album, // album name, used as second part of relative path on server
+            "a": albumField.text ?? DEFAULT_ALBUM_NAME, // second part of relative path on server
             "p": HARD_CODED_PASSWORD_HOW_SHAMEFUL,
             "i": imgBase64,  // image data
 

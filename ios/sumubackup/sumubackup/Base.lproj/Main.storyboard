@@ -16,30 +16,38 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="Qcn-rH-bqG" userLabel="Status Message">
-                                <rect key="frame" x="20" y="187" width="374" height="153"/>
+                                <rect key="frame" x="20" y="437" width="374" height="108"/>
                                 <constraints>
-                                    <constraint firstAttribute="height" constant="153" id="t9h-HO-8wr"/>
+                                    <constraint firstAttribute="height" constant="108" id="4ir-KG-3JU"/>
                                 </constraints>
                                 <fontDescription key="fontDescription" type="system" pointSize="17"/>
                                 <nil key="textColor"/>
                                 <nil key="highlightedColor"/>
                             </label>
                             <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="75X-Ey-blR">
-                                <rect key="frame" x="149" y="348" width="116" height="30"/>
+                                <rect key="frame" x="149" y="553" width="116" height="30"/>
                                 <state key="normal" title="Find New Photos"/>
                                 <connections>
                                     <action selector="findNewPhotosHandler:forEvent:" destination="BYZ-38-t0r" eventType="touchUpInside" id="aRi-Qp-hw7"/>
                                 </connections>
                             </button>
                             <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="kyd-lu-mAB">
-                                <rect key="frame" x="149.5" y="386" width="115" height="30"/>
+                                <rect key="frame" x="149.5" y="591" width="115" height="30"/>
                                 <state key="normal" title="Find New Videos"/>
                                 <connections>
                                     <action selector="findNewVideosHandler:forEvent:" destination="BYZ-38-t0r" eventType="touchUpInside" id="Lhf-YL-EpV"/>
                                 </connections>
                             </button>
-                            <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="10J-aE-eEU">
-                                <rect key="frame" x="182.5" y="424" width="49" height="30"/>
+                            <textField opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" placeholder="Album" textAlignment="natural" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="i0J-sI-TfS">
+                                <rect key="frame" x="123" y="629" width="168" height="34"/>
+                                <fontDescription key="fontDescription" type="system" pointSize="14"/>
+                                <textInputTraits key="textInputTraits"/>
+                            </textField>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" translatesAutoresizingMaskIntoConstraints="NO" id="HPv-5w-xrK" userLabel="Preview Image">
+                                <rect key="frame" x="20" y="194" width="374" height="235"/>
+                            </imageView>
+                            <button opaque="NO" contentMode="scaleToFill" enabled="NO" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="10J-aE-eEU">
+                                <rect key="frame" x="155" y="671" width="104" height="30"/>
                                 <state key="normal" title="Upload"/>
                                 <connections>
                                     <action selector="uploadHandler:forEvent:" destination="BYZ-38-t0r" eventType="touchUpInside" id="WIC-i6-PPy"/>
@@ -48,20 +56,31 @@
                         </subviews>
                         <color key="backgroundColor" systemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
                         <constraints>
-                            <constraint firstItem="kyd-lu-mAB" firstAttribute="centerX" secondItem="8bC-Xf-vdC" secondAttribute="centerX" id="2fZ-LP-a8Q"/>
-                            <constraint firstItem="kyd-lu-mAB" firstAttribute="top" secondItem="75X-Ey-blR" secondAttribute="bottom" constant="8" id="57q-xd-0a3"/>
-                            <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="kyd-lu-mAB" secondAttribute="bottom" constant="8" id="LXh-EX-e3Y"/>
-                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="centerX" secondItem="kyd-lu-mAB" secondAttribute="centerX" id="RTf-Wt-TOI"/>
-                            <constraint firstItem="75X-Ey-blR" firstAttribute="top" secondItem="Qcn-rH-bqG" secondAttribute="bottom" constant="8" id="Rtw-Tn-fM3"/>
-                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="centerX" secondItem="75X-Ey-blR" secondAttribute="centerX" id="Yyt-0K-0fc"/>
-                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="centerX" secondItem="10J-aE-eEU" secondAttribute="centerX" id="qGH-JW-fm4"/>
-                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="leading" secondItem="8bC-Xf-vdC" secondAttribute="leadingMargin" id="tSV-KW-GI2"/>
-                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="top" secondItem="6Tk-OE-BBY" secondAttribute="top" constant="143" id="xhM-ts-gLw"/>
+                            <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="i0J-sI-TfS" secondAttribute="bottom" constant="8" id="89l-p6-8Ik"/>
+                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="top" secondItem="HPv-5w-xrK" secondAttribute="bottom" constant="8" id="8AA-MN-tBT"/>
+                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="leading" secondItem="8bC-Xf-vdC" secondAttribute="leadingMargin" id="CPo-pd-9Gg"/>
+                            <constraint firstItem="kyd-lu-mAB" firstAttribute="centerX" secondItem="HPv-5w-xrK" secondAttribute="centerX" id="FTb-jm-Az8"/>
+                            <constraint firstItem="10J-aE-eEU" firstAttribute="centerX" secondItem="i0J-sI-TfS" secondAttribute="centerX" id="KF3-Sj-Bv4"/>
+                            <constraint firstItem="i0J-sI-TfS" firstAttribute="top" secondItem="kyd-lu-mAB" secondAttribute="bottom" constant="8" id="MiN-bl-4DC"/>
+                            <constraint firstItem="kyd-lu-mAB" firstAttribute="top" secondItem="75X-Ey-blR" secondAttribute="bottom" constant="8" id="OyX-Hy-a5R"/>
+                            <constraint firstItem="kyd-lu-mAB" firstAttribute="centerX" secondItem="75X-Ey-blR" secondAttribute="centerX" id="VRW-LG-P2E"/>
+                            <constraint firstAttribute="bottom" secondItem="kyd-lu-mAB" secondAttribute="bottom" constant="275" id="VXh-yW-sTz"/>
+                            <constraint firstItem="i0J-sI-TfS" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="123" id="evp-QH-tSP"/>
+                            <constraint firstItem="HPv-5w-xrK" firstAttribute="top" secondItem="6Tk-OE-BBY" secondAttribute="top" constant="150" id="f0N-eq-MBE"/>
+                            <constraint firstItem="i0J-sI-TfS" firstAttribute="centerX" secondItem="kyd-lu-mAB" secondAttribute="centerX" id="hjv-W7-TfO"/>
+                            <constraint firstItem="Qcn-rH-bqG" firstAttribute="leading" secondItem="HPv-5w-xrK" secondAttribute="leading" id="jyu-KN-HvL"/>
+                            <constraint firstItem="75X-Ey-blR" firstAttribute="top" secondItem="Qcn-rH-bqG" secondAttribute="bottom" constant="8" id="mi1-TW-EkK"/>
+                            <constraint firstItem="10J-aE-eEU" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="155" id="qPV-xf-tMO"/>
+                            <constraint firstItem="kyd-lu-mAB" firstAttribute="centerX" secondItem="Qcn-rH-bqG" secondAttribute="centerX" id="taZ-J3-d3F"/>
+                            <constraint firstItem="kyd-lu-mAB" firstAttribute="centerX" secondItem="8bC-Xf-vdC" secondAttribute="centerX" id="znC-Vf-pi2"/>
                         </constraints>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
                     </view>
                     <connections>
+                        <outlet property="albumField" destination="i0J-sI-TfS" id="lhO-c9-Pk2"/>
+                        <outlet property="previewImage" destination="HPv-5w-xrK" id="VHi-4y-uQP"/>
                         <outlet property="statusMessage" destination="Qcn-rH-bqG" id="CFX-Ed-bVM"/>
+                        <outlet property="uploadButton" destination="10J-aE-eEU" id="JED-IP-LQk"/>
                     </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="dkx-z0-nzr" sceneMemberID="firstResponder"/>
