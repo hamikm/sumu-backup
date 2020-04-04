@@ -11,8 +11,8 @@ import Photos
 
 
 // TODO: remove these notes periodically
-// Added some buttons to UI for looking for photos, videos. The status message doesn't update correctly, probably
-// bc of some main thread blocking shit
+// Need to figure out how to key the metadata table on the backend so i can rapidly figure out if an image has been uploaded yet
+// maybe display thumbnail of image that's being uploaded in ios app? not sure if worth the effort
 
 class ViewController: UIViewController {
     
@@ -33,9 +33,9 @@ class ViewController: UIViewController {
     let SOME_UPLOADS_FAILED = "{number} of {total} uploads FAILED. Exercise caution when you delete images from your phone; some didn't make it onto the backup server!"
     let UPLOAD_FAILED_MSG = "Upload FAILED for image {number} of {total}!"
 
-    let DEV_UPLOAD_URL = "http://0.0.0.0:9090/image"
+    let DEV_UPLOAD_URL = "http://0.0.0.0:9090/save"
     let DEV_CHECK_URL = "http://0.0.0.0:9090/check"
-    let PROD_UPLOAD_URL = "http://vingilot:9090/image"
+    let PROD_UPLOAD_URL = "http://vingilot:9090/save"
     let PROD_CHECK_URL = "http://0.0.0.0:9090/check"
     
     let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
@@ -78,13 +78,18 @@ class ViewController: UIViewController {
         for i in 0..<results!.count {
             print("Waiting for upload of image", i - 1)
             let asset = results!.object(at: i)
+            let t = Int((asset.creationDate ?? Date()).timeIntervalSince1970.nextUp)
+            let lat = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
+            let long = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
+            let f = asset.isFavorite
+
             manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
-                self.upload(img: img!, count: i + 1, total: self.results!.count)
+                self.upload(img: img!, count: i + 1, total: self.results!.count, timestamp: t, latitude: lat, longitude: long, isFavorite: f)
             }
         }
     }
     
-    func upload(img: UIImage, count: Int, total: Int) {
+    func upload(img: UIImage, count: Int, total: Int, timestamp: Int, latitude: Double?, longitude: Double?, isFavorite: Bool) {
         let url = URL(string: DEV_UPLOAD_URL)!
         
         // Get request ready
@@ -93,11 +98,16 @@ class ViewController: UIViewController {
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpMethod = "POST"
         let imgBase64 = img.pngData()?.base64EncodedString()
-        let jsonObj: [String: Any] = [
-            "i": imgBase64 ?? "null",  // image data
-            "d": user,  // user name, used as first path of relative path on server where photos will be stored
+        let jsonObj: [String: Any?] = [
             "a": album, // album name, used as second part of relative path on server
-            "l": HARD_CODED_PASSWORD_HOW_SHAMEFUL,
+            "p": HARD_CODED_PASSWORD_HOW_SHAMEFUL,
+            "i": imgBase64,  // image data
+
+            "u": user,  // user name, used as first path of relative path on server where photos will be stored
+            "t": timestamp,
+            "lat": latitude,
+            "long": longitude,
+            "f": isFavorite,
         ]
         let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: [])
         req.httpBody = data
@@ -108,6 +118,7 @@ class ViewController: UIViewController {
                     self.statusMessage.text = self.UPLOADED_IMAGE_MSG.replacingOccurrences(of: "{total}", with: String(total)).replacingOccurrences(of: "{number}", with: String(count))
                 } else {
                     print ("Upload failed.")
+                    print ("  Error:", error ?? "nil error")
                     self.failedUploadCount += 1
                     self.statusMessage.text = self.UPLOAD_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(total)).replacingOccurrences(of: "{number}", with: String(count))
                 }
