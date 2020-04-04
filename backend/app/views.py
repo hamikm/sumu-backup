@@ -9,8 +9,10 @@ PW = 'beeblesissuchameerkat'
 ROOT_DIR = '/Users/Mukelyan/sandbox/sumu-backup/backend'  # TODO update for server
 EXTENSION = 'png'
 FILENAME_FORMAT = '{timestamp}_{uuid}.{extension}'
-DIRECTORY_TO_WRITE_FILES='{root}/{user}/{album}'
+USER_DIRECTORY = '{root}/{user}'
+DIRECTORY_TO_WRITE_FILES = '{userdir}/{album}'
 ABS_FILENAME = '{dir}/{filename}'
+FAVORITES_DIR_NAME = 'favorites'
 
 def makeError(statusCode, msg=''):
     ret = jsonify({
@@ -52,13 +54,24 @@ def uploadImage():
         uuid=rowDict.get('id'),
         extension=EXTENSION
     )
-    directory = DIRECTORY_TO_WRITE_FILES.format(
+    userDirectory = USER_DIRECTORY.format(
         root=ROOT_DIR,
-        user=rowDict.get('user'),
-        album=albumName,
+        user=rowDict.get('user')
+    )
+    directory = DIRECTORY_TO_WRITE_FILES.format(
+        userdir=userDirectory,
+        album=albumName
+    )
+    favoritesDirectory = DIRECTORY_TO_WRITE_FILES.format(
+        userdir=userDirectory,
+        album=FAVORITES_DIR_NAME
     )
     absPath = ABS_FILENAME.format(
         dir=directory,
+        filename=relativeFilename
+    )
+    absFavoritePath = ABS_FILENAME.format(
+        dir=favoritesDirectory,
         filename=relativeFilename
     )
     rowDict['absoluteFilename'] = absPath
@@ -67,8 +80,18 @@ def uploadImage():
     row = None
     if (models.ImageRow.validate(rowDict)):
         try:
+            # make album directory if it doesn't exist yet
             if not pathlib.Path(directory).is_dir():
                 os.mkdir(directory)
+            if not pathlib.Path(favoritesDirectory).is_dir():
+                os.mkdir(favoritesDirectory)
+
+            # write image to favorites directory if it's a  favorite
+            if rowDict.get('isFavorite'):
+                with open(absFavoritePath, "wb") as fh:
+                    fh.write(base64.b64decode(imageData))
+
+            # write it to its own album and put a metadata row in the DB
             with open(absPath, "wb") as fh:
                 fh.write(base64.b64decode(imageData))
                 row = models.ImageRow.fromDict(rowDict)
