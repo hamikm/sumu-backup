@@ -11,8 +11,8 @@ import Photos
 
 
 // TODO: remove these notes periodically
-// Need to figure out how to key the metadata table on the backend so i can rapidly figure out if an image has been uploaded yet
-// maybe display thumbnail of image that's being uploaded in ios app? not sure if worth the effort
+// add a "check" endpoint so no duplicate uploads
+// check if this works when app is backgrounded...
 
 class ViewController: UIViewController {
     
@@ -41,11 +41,13 @@ class ViewController: UIViewController {
     let SOME_UPLOADS_FAILED = "{number} of {total} uploads FAILED. Exercise caution when you delete images from your phone; some didn't make it onto the backup server!"
     let UPLOAD_FAILED_MSG = "Upload FAILED for image {number} of {total}!"
 
-    let DEV_UPLOAD_URL = "http://0.0.0.0:9090/save"
-    let DEV_CHECK_URL = "http://0.0.0.0:9090/check"
-    let PROD_UPLOAD_URL = "http://vingilot:9090/save"
-    let PROD_CHECK_URL = "http://0.0.0.0:9090/check"
-    
+    let ENV = "dev"
+    let LOCALHOST = "0.0.0.0"
+    let SERVER = "vingilot"
+    let SAVE_URL = "http://{host}:9090/save"
+    let CHECK_URL = "http://{host}:9090/check"
+    let HEALTH_URL = "http://{host}:9090/health"
+
     let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
     let DEFAULT_ALBUM_NAME = "default"
 
@@ -71,7 +73,7 @@ class ViewController: UIViewController {
         statusMessage.text = FOUND_IMAGES_MSG.replacingOccurrences(of: "{total}", with: String(results!.count))
     }
     
-    func startUpload() {
+    func startUpload(album: String) {
         if results == nil {
             return
         }
@@ -97,17 +99,29 @@ class ViewController: UIViewController {
             let f = asset.isFavorite
 
             manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
-                DispatchQueue.main.async {
-                    self.previewImage.image = img
-                }
-                self.upload(img: img!, count: i + 1, total: self.results!.count, timestamp: t, latitude: lat, longitude: long, isFavorite: f)
+                self.upload(img: img!, count: i + 1, total: self.results!.count, timestamp: t, latitude: lat, longitude: long, isFavorite: f, album: album)
             }
         }
     }
     
-    func upload(img: UIImage, count: Int, total: Int, timestamp: Int, latitude: Double?, longitude: Double?, isFavorite: Bool) {
-        let url = URL(string: DEV_UPLOAD_URL)!
-        
+    func getUrl(endpoint: String) -> URL {
+        let urlTemplate: String?
+        switch endpoint {
+        case "save":
+            urlTemplate = SAVE_URL
+        case "check":
+            urlTemplate = CHECK_URL
+        case "health":
+            urlTemplate = HEALTH_URL
+        default:
+            urlTemplate = nil
+        }
+        return URL(string: urlTemplate!.replacingOccurrences(of: "{host}", with: (ENV == "dev" ? LOCALHOST : SERVER)))!
+    }
+
+    func upload(img: UIImage, count: Int, total: Int, timestamp: Int, latitude: Double?, longitude: Double?, isFavorite: Bool, album: String) {
+        let url = getUrl(endpoint: "save")
+
         // Get request ready
         let sesh = URLSession(configuration: .default)
         var req = URLRequest(url: url)
@@ -115,7 +129,7 @@ class ViewController: UIViewController {
         req.httpMethod = "POST"
         let imgBase64 = img.pngData()?.base64EncodedString()
         let jsonObj: [String: Any?] = [
-            "a": albumField.text ?? DEFAULT_ALBUM_NAME, // second part of relative path on server
+            "a": album, // second part of relative path on server
             "p": HARD_CODED_PASSWORD_HOW_SHAMEFUL,
             "i": imgBase64,  // image data
 
@@ -138,6 +152,7 @@ class ViewController: UIViewController {
                     self.failedUploadCount += 1
                     self.statusMessage.text = self.UPLOAD_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(total)).replacingOccurrences(of: "{number}", with: String(count))
                 }
+                self.previewImage.image = img
                 if (count == total) {
                     if (self.failedUploadCount > 0) {
                         self.statusMessage.text = self.SOME_UPLOADS_FAILED.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount))
@@ -161,8 +176,9 @@ extension ViewController {
     }
     
     @IBAction func uploadHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        let album = albumField.text ?? DEFAULT_ALBUM_NAME
         DispatchQueue.global(qos: .background).async {
-            self.startUpload()
+            self.startUpload(album: album)
         }
     }
 }
