@@ -15,4 +15,4 @@ You need `python3` and `pipenv`.
 1. `pipenv --three shell`
 2. `python`
 3. `from app import models`
-4. `models.ImageRow.query.all()` or `models.ImageRow.query.filter_by(isFavorite=True).first()`
+4. `models.MediaMetadata.query.all()` or `models.MediaMetadata.query.filter_by(isFavorite=True).first()`

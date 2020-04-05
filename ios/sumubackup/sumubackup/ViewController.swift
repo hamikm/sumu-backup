@@ -9,9 +9,7 @@
 import UIKit
 import Photos
 
-// TODO
-// 1. getVideos, figure out how to store those lol
-// 2. get rid of TODOs below
+// TODO get rid of TODOs below
 class ViewController: UIViewController {
     
     @IBOutlet weak var statusMessage: UILabel!
@@ -27,6 +25,7 @@ class ViewController: UIViewController {
     var timestamps: [UInt64: [String]] = [:]
     var semaphore = DispatchSemaphore(value: 0)
     var uploadCallsGroup = DispatchGroup()
+    var user: String = "vicky"
     var isServerOnline = false {
         didSet {
             if isServerOnline {
@@ -35,21 +34,22 @@ class ViewController: UIViewController {
                 statusMessage.text = ViewController.WELCOME_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
             } else {
                 statusMessage.text = ViewController.SERVER_OFFLINE_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
+                DispatchQueue.main.asyncAfter(deadline: .now() + ViewController.RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS) {
+                    self.checkIsServerOnline()
+                }
             }
         }
     }
 
-    var user: String = "vicky"
-    
     static let CHECKING_SERVER_MSG = "Checking if {server} is online..."
     static let SERVER_OFFLINE_MSG = "{server} is offline."
     static let WELCOME_MSG = "Upload iPhone media to {server}!"
     static let STARTING_UPLOAD = "Starting upload..."
-    static let UPLOADING_IMAGE_MSG = "Uploading image {number} of {total}..."
-    static let UPLOAD_FINISHED_MSG = "Uploads finished. Double check Plex for images; if they're there, you can delete photos from your phone."
-    static let SOME_UPLOADS_FAILED_MSG = "{number} of {total} uploads failed. Careful when you delete images from your phone!"
-    static let FINAL_DUPLICATES_MSG = "Did not upload {duplicates} images because they were already on {server}."
-    static let DUPLICATE_MSG = "Image {number} of {total} is already on the server!"
+    static let UPLOADING_MEDIA_MSG = "Uploading {type} {number} of {total}..."
+    static let UPLOADS_FINISHED_MSG = "Uploads finished. Double check Plex for {type}; if they're there, you can delete them from your phone."
+    static let SOME_UPLOADS_FAILED_MSG = "{number} of {total} uploads failed. Careful when you delete {type} from your phone!"
+    static let FINAL_DUPLICATES_MSG = "Did not upload {duplicates} {type} because they were already on {server}."
+    static let DUPLICATE_MSG = "{type} {number} of {total} is already on the server!"
 
     static let ENV = "prod" // TODO set
     static let LOCALHOST = "0.0.0.0"
@@ -60,6 +60,7 @@ class ViewController: UIViewController {
 
     static let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
     static let DEFAULT_ALBUM_NAME = "default"
+    static let RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS = DispatchTimeInterval.seconds(5)
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -76,12 +77,12 @@ class ViewController: UIViewController {
         checkIsServerOnline()
     }
     
-    func getPhotos() {
+    func getMedia(mediaType: PHAssetMediaType) {
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         fetchOptions.includeAllBurstAssets = false
         fetchOptions.includeAssetSourceTypes = [.typeCloudShared, .typeUserLibrary, .typeiTunesSynced]
-        results = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        results = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
     }
 
     func shouldUpload(timestamp: UInt64, sha256: String) -> Bool {
@@ -95,18 +96,99 @@ class ViewController: UIViewController {
         return false
     }
     
-    func startUploads(album: String) {
-        if results == nil {
-            return
-        }
-
-        let manager = PHImageManager.default()
+    func handleImageAsset(album: String, asset: PHAsset, assetNum: Int, t: UInt64, lat: Double?, long: Double?, f: Bool) {
         let requestOptions = PHImageRequestOptions()
         requestOptions.isSynchronous = true
         requestOptions.deliveryMode = .highQualityFormat
         requestOptions.resizeMode = .none
         requestOptions.isNetworkAccessAllowed = true
-        
+
+        let manager = PHImageManager.default()
+        manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
+            guard let img = img else {
+                print ("Image was nil")
+                self.uploadCallsGroup.leave()
+                return
+            }
+
+            let sha256 = img.sha256()
+            DispatchQueue.main.async { self.previewImage.image = img }
+            if self.shouldUpload(timestamp: t, sha256: sha256) {
+                DispatchQueue.main.async {
+                    self.statusMessage.text = ViewController.UPLOADING_MEDIA_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "image")
+                }
+                let imgB64 = img.pngData()!.base64EncodedString()
+                self.sendMediaOverWire(album: album, mediaB64: imgB64, timestamp: t, latitude: lat, longitude: long, isFavorite: f, sha256: sha256, mediaType: .image)
+            } else {
+                self.duplicates += 1
+                DispatchQueue.main.async {
+                    self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "Image")
+                }
+                self.uploadCallsGroup.leave()
+            }
+        }
+    }
+
+    func getThumbnail(videoAsset: AVAsset) -> UIImage? {
+        let thumbnailGenerator = AVAssetImageGenerator(asset: videoAsset)
+        thumbnailGenerator.appliesPreferredTrackTransform = true
+        let midpointTime = CMTimeMakeWithSeconds(videoAsset.duration.seconds / 2 * 600, preferredTimescale: 600)
+        do {
+            let img = try thumbnailGenerator.copyCGImage(at: midpointTime, actualTime: nil)
+            let thumbnail = UIImage(cgImage: img)
+            return thumbnail
+        } catch {
+            print(error.localizedDescription)
+            return nil
+        }
+    }
+
+    func handleVideoAsset(album: String, asset: PHAsset, assetNum: Int, t: UInt64, lat: Double?, long: Double?, f: Bool) {
+        let requestOptions = PHVideoRequestOptions()
+        requestOptions.deliveryMode = .highQualityFormat
+        requestOptions.isNetworkAccessAllowed = true
+
+        let manager = PHImageManager.default()
+        manager.requestAVAsset(forVideo: asset, options: requestOptions) { (videoAsset, audioMix, info) in
+            guard let videoAsset = videoAsset else {
+                print ("Nil video asset")
+                self.uploadCallsGroup.leave()
+                return
+            }
+
+            if let assetUrl = videoAsset as? AVURLAsset {
+                guard let videoData = try? Data(contentsOf: assetUrl.url) else {
+                    print("Unable to get video data! :-(")
+                    self.uploadCallsGroup.leave()
+                    return
+                }
+
+                let thumbnailPreview = self.getThumbnail(videoAsset: videoAsset)
+                let sha256 = videoData.sha256()
+
+                DispatchQueue.main.async { self.previewImage.image = thumbnailPreview }
+                if self.shouldUpload(timestamp: t, sha256: sha256) {
+                    DispatchQueue.main.async {
+                        self.statusMessage.text = ViewController.UPLOADING_MEDIA_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "video")
+                    }
+                    let videoB64 = videoData.base64EncodedString()
+                    self.sendMediaOverWire(album: album, mediaB64: videoB64, timestamp: t, latitude: lat, longitude: long, isFavorite: f, sha256: sha256, mediaType: .video)
+                } else {
+                    self.duplicates += 1
+                    DispatchQueue.main.async {
+                        self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "Video")
+                    }
+                    self.uploadCallsGroup.leave()
+                }
+            }
+        }
+    }
+
+    func startUploads(album: String, mediaType: PHAssetMediaType) {
+        if results == nil {
+            return
+        }
+
         failedUploadCount = 0
         duplicates = 0
         DispatchQueue.main.async {
@@ -121,22 +203,11 @@ class ViewController: UIViewController {
                 let long = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
                 let f = asset.isFavorite
 
-                manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
-                    let sha256 = img!.sha256()
-                    self.uploadCallsGroup.enter()
-                    DispatchQueue.main.async { self.previewImage.image = img! }
-                    if self.shouldUpload(timestamp: t, sha256: sha256) {
-                        DispatchQueue.main.async {
-                            self.statusMessage.text = ViewController.UPLOADING_IMAGE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
-                        }
-                        self.upload(img: img!, timestamp: t, latitude: lat, longitude: long, isFavorite: f, album: album, sha256: sha256)
-                    } else {
-                        self.duplicates += 1
-                        DispatchQueue.main.async {
-                            self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
-                        }
-                        self.uploadCallsGroup.leave()
-                    }
+                self.uploadCallsGroup.enter()
+                if mediaType == .image {
+                    handleImageAsset(album: album, asset: asset, assetNum: i + 1, t: t, lat: lat, long: long, f: f)
+                } else {
+                    handleVideoAsset(album: album, asset: asset, assetNum: i + 1, t: t, lat: lat, long: long, f: f)
                 }
             }
         }
@@ -194,17 +265,16 @@ class ViewController: UIViewController {
         }).resume()
     }
 
-    func upload(img: UIImage, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, album: String, sha256: String) {
+    func sendMediaOverWire(album: String, mediaB64: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, sha256: String, mediaType: PHAssetMediaType) {
         let url = getUrl(endpoint: "save")
         let sesh = URLSession(configuration: .default)
         var req = URLRequest(url: url)
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpMethod = "POST"
-        let imgBase64 = img.pngData()?.base64EncodedString()
         let jsonObj: [String: Any?] = [
             "a": album, // second part of relative path on server
             "p": ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL,
-            "i": imgBase64,  // image data
+            "i": mediaB64,  // image or video data
 
             "u": user,  // user name, used as first path of relative path on server where photos will be stored
             "t": timestamp,
@@ -212,6 +282,7 @@ class ViewController: UIViewController {
             "long": longitude,
             "f": isFavorite,
             "s": sha256,
+            "v": (mediaType == .image ? false : true)
         ]
         let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: [])
         req.httpBody = data
@@ -225,32 +296,41 @@ class ViewController: UIViewController {
             }
         }).resume()
     }
+
+    func getAlbumString() -> String {
+        return (albumField.text == nil || albumField.text!.count == 0) ? ViewController.DEFAULT_ALBUM_NAME : albumField.text!
+    }
 }
 
 // Handlers for buttons
 extension ViewController {
-    @IBAction func uploadPhotosHandler(_ sender: UIButton, forEvent event: UIEvent) {
-        let album = albumField.text ?? ViewController.DEFAULT_ALBUM_NAME
-        getPhotos()
+    func getMediaThenUpload(mediaType: PHAssetMediaType) {
+        getMedia(mediaType: mediaType)
+        let album = getAlbumString()
+
         DispatchQueue.global(qos: .background).async {
             self.getTimestamps()
             _ = self.semaphore.wait(wallTimeout: .distantFuture)
-            self.startUploads(album: album)
+            self.startUploads(album: album, mediaType: mediaType)
 
             // Show final status message
             self.uploadCallsGroup.notify(queue: .main) {
-                let duplicatesMsg = self.duplicates > 0 ? " " + ViewController.FINAL_DUPLICATES_MSG.replacingOccurrences(of: "{duplicates}", with: String(self.duplicates)).replacingOccurrences(of: "{server}", with: ViewController.SERVER) : ""
+                let duplicatesMsg = self.duplicates > 0 ? " " + ViewController.FINAL_DUPLICATES_MSG.replacingOccurrences(of: "{duplicates}", with: String(self.duplicates)).replacingOccurrences(of: "{server}", with: ViewController.SERVER).replacingOccurrences(of: "{type}", with: (mediaType == .image ? "image(s)" : "video(s)")) : ""
                 if (self.failedUploadCount > 0) {
-                    self.statusMessage.text = ViewController.SOME_UPLOADS_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount)) + duplicatesMsg
+                    self.statusMessage.text = ViewController.SOME_UPLOADS_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount)).replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "video")) + duplicatesMsg
                 } else {
-                    self.statusMessage.text = ViewController.UPLOAD_FINISHED_MSG + duplicatesMsg
+                    self.statusMessage.text = ViewController.UPLOADS_FINISHED_MSG.replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "videos")) + duplicatesMsg
                 }
             }
         }
     }
 
+    @IBAction func uploadPhotosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        getMediaThenUpload(mediaType: .image)
+    }
+
     @IBAction func uploadVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
-        print("shietttt")
+        getMediaThenUpload(mediaType: .video)
     }
 
     @IBAction func albumEnteredHandler(_ sender: UITextField, forEvent event: UIEvent) {

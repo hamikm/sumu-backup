@@ -7,7 +7,8 @@ import os
 
 PW = 'beeblesissuchameerkat'
 ROOT_DIR = '/Users/Mukelyan/sandbox/sumu-backup/backend'  # TODO update for server
-EXTENSION = 'png'
+IMG_EXTENSION = 'png'
+VIDEO_EXTENSION = 'mp4'
 FILENAME_FORMAT = '{timestamp}_{uuid}.{extension}'
 USER_DIRECTORY = '{root}/{user}'
 DIRECTORY_TO_WRITE_FILES = '{userdir}/{album}'
@@ -38,7 +39,7 @@ def getTimestamps():
 
     user = request.args.get('u')
     ret = {}
-    for row in models.ImageRow.query.all():
+    for row in models.MediaMetadata.query.all():
         if user != row.user:
             continue
         timestamp = row.creationTimestamp
@@ -50,12 +51,12 @@ def getTimestamps():
 
 @app.route('/save', methods=['POST'])
 def uploadImage():
-    '''Receive image, store it in user plex directory'''
+    '''Receive image or video, store it in user plex directory'''
     content = request.get_json(silent=True)
 
     albumName = content.get('a')
     password = content.get('p')
-    imageData = content.get('i')
+    mediaData = content.get('i')
 
     if albumName is None:
         albumName = DEFAULT_ALBUM
@@ -72,12 +73,13 @@ def uploadImage():
         'locationLatitude': content.get('lat'),
         'locationLongitude': content.get('long'),
         'isFavorite': content.get('f'),
-        'sha256': content.get('s')
+        'sha256': content.get('s'),
+        'isVideo': content.get('v')
     }
     relativeFilename = FILENAME_FORMAT.format(
         timestamp=rowDict.get('creationTimestamp'),
         uuid=rowDict.get('id'),
-        extension=EXTENSION
+        extension=(IMG_EXTENSION if not rowDict['isVideo'] else VIDEO_EXTENSION)
     )
     userDirectory = USER_DIRECTORY.format(
         root=ROOT_DIR,
@@ -103,7 +105,7 @@ def uploadImage():
 
     # write image to disk and store metadata in database
     row = None
-    if (models.ImageRow.validate(rowDict)):
+    if (models.MediaMetadata.validate(rowDict)):
         try:
             # make album directory if it doesn't exist yet
             if not pathlib.Path(directory).is_dir():
@@ -114,12 +116,12 @@ def uploadImage():
             # write image to favorites directory if it's a  favorite
             if rowDict.get('isFavorite'):
                 with open(absFavoritePath, "wb") as fh:
-                    fh.write(base64.b64decode(imageData))
+                    fh.write(base64.b64decode(mediaData))
 
             # write it to its own album and put a metadata row in the DB
             with open(absPath, "wb") as fh:
-                fh.write(base64.b64decode(imageData))
-                row = models.ImageRow.fromDict(rowDict)
+                fh.write(base64.b64decode(mediaData))
+                row = models.MediaMetadata.fromDict(rowDict)
                 db.session.add(row)
                 db.session.commit()
                 ret = {'id': row.id}
