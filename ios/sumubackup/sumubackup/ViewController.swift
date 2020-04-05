@@ -9,47 +9,45 @@
 import UIKit
 import Photos
 
-
-// TODO: remove these notes periodically
-// add a "check" endpoint so no duplicate uploads
+// TODO:
+// check if health endpoint call succeeds. if not, say something is wrong with server
 // check if this works when app is backgrounded...
+// finish new done with uploads status message down below
 
 class ViewController: UIViewController {
     
     @IBOutlet weak var statusMessage: UILabel!
     @IBOutlet weak var albumField: UITextField!
-    @IBOutlet weak var uploadButton: UIButton!
     @IBOutlet weak var previewImage: UIImageView!
-    
+
     var images = [UIImage]()
-    var results: PHFetchResult<PHAsset>? {
-        didSet {
-            if results != nil {
-                uploadButton.isEnabled = true
-            }
-        }
-    }
+    var results: PHFetchResult<PHAsset>?
     var failedUploadCount: Int = 0
-    
+    var duplicates: Int = 0
+    var timestamps: [UInt64: [String]] = [:]
+    var semaphore = DispatchSemaphore(value: 0)
+    var uploadCallsGroup = DispatchGroup()
+
     var user: String = "vicky"
     
-    let WELCOME_MSG = "Click the buttons below to get started!"
-    let FOUND_IMAGES_MSG = "Found {total} images that have not been uploaded to vingilot. Press Upload to upload them."
-    let STARTING_UPLOAD = "Starting upload."
-    let UPLOADED_IMAGE_MSG = "Uploaded image {number} of {total}!"
-    let UPLOAD_FINISHED_MSG = "Uploads completed successfully. Double check Plex for the uploaded images. If they're there, you can delete photos from your phone."
-    let SOME_UPLOADS_FAILED = "{number} of {total} uploads FAILED. Exercise caution when you delete images from your phone; some didn't make it onto the backup server!"
-    let UPLOAD_FAILED_MSG = "Upload FAILED for image {number} of {total}!"
+    static let WELCOME_MSG = "Upload iPhone media to {server}!"
+    static let STARTING_UPLOAD = "Starting upload..."
+    static let UPLOADING_IMAGE_MSG = "Uploading image {number} of {total}..."
+    static let UPLOAD_FINISHED_MSG = "Uploads finished. Double check Plex for images; if they're there, you can delete photos from your phone."
+    static let SOME_UPLOADS_FAILED_MSG = "{number} of {total} uploads failed. Careful when you delete images from your phone!"
+    static let FINAL_DUPLICATES_MSG = "Did not upload {duplicates} images because they were already on {server}."
+    static let DUPLICATE_MSG = "Image {number} of {total} is already on the server!"
 
-    let ENV = "dev"
-    let LOCALHOST = "0.0.0.0"
-    let SERVER = "vingilot"
-    let SAVE_URL = "http://{host}:9090/save"
-    let CHECK_URL = "http://{host}:9090/check"
-    let HEALTH_URL = "http://{host}:9090/health"
+    static let ENV = "dev"
+    static let LOCALHOST = "0.0.0.0"
+    static let SERVER = "vingilot"
+    static let SAVE_URL = "http://{host}:9090/save"
+    static let CHECK_URL = "http://{host}:9090/check"
+    static let HEALTH_URL = "http://{host}:9090/health"
+    static let TIMESTAMPS_URL = "http://{host}:9090/timestamps"
 
-    let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
-    let DEFAULT_ALBUM_NAME = "default"
+    static let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
+    static let DEFAULT_ALBUM_NAME = "default"
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -57,7 +55,7 @@ class ViewController: UIViewController {
 
         statusMessage.numberOfLines = 10
         statusMessage.lineBreakMode = .byWordWrapping
-        statusMessage.text = WELCOME_MSG
+        statusMessage.text = ViewController.WELCOME_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
 
         if UIDevice.current.name.lowercased() == "goldberry" {
             user = "hamik"
@@ -70,7 +68,17 @@ class ViewController: UIViewController {
         fetchOptions.includeAllBurstAssets = false
         fetchOptions.includeAssetSourceTypes = [.typeCloudShared, .typeUserLibrary, .typeiTunesSynced]
         results = PHAsset.fetchAssets(with: .image, options: fetchOptions)
-        statusMessage.text = FOUND_IMAGES_MSG.replacingOccurrences(of: "{total}", with: String(results!.count))
+    }
+
+    func shouldUpload(timestamp: UInt64, sha256: String) -> Bool {
+        let hashesForTimestamp = self.timestamps[timestamp]
+        if hashesForTimestamp == nil {
+            return true
+        }
+        if hashesForTimestamp!.firstIndex(of: sha256) == nil {
+            return true
+        }
+        return false
     }
     
     func startUpload(album: String) {
@@ -85,41 +93,78 @@ class ViewController: UIViewController {
         requestOptions.resizeMode = .none
         requestOptions.isNetworkAccessAllowed = true
         
+        failedUploadCount = 0
+        duplicates = 0
         DispatchQueue.main.async {
-            self.failedUploadCount = 0
-            self.statusMessage.text = self.STARTING_UPLOAD
+            self.statusMessage.text = ViewController.STARTING_UPLOAD
         }
 
         for i in 0..<results!.count {
             print("Waiting for upload of image", i - 1)
             let asset = results!.object(at: i)
-            let t = Int((asset.creationDate ?? Date()).timeIntervalSince1970.nextUp)
+            let t = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
             let lat = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
             let long = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
             let f = asset.isFavorite
 
             manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
-                self.upload(img: img!, count: i + 1, total: self.results!.count, timestamp: t, latitude: lat, longitude: long, isFavorite: f, album: album)
+                let sha256 = img!.sha256()
+                self.uploadCallsGroup.enter()
+                DispatchQueue.main.async { self.previewImage.image = img! }
+                if self.shouldUpload(timestamp: t, sha256: sha256) {
+                    DispatchQueue.main.async {
+                        self.statusMessage.text = ViewController.UPLOADING_IMAGE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
+                    }
+                    self.upload(img: img!, timestamp: t, latitude: lat, longitude: long, isFavorite: f, album: album, sha256: sha256)
+                } else {
+                    self.duplicates += 1
+                    DispatchQueue.main.async {
+                        self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
+                    }
+                    self.uploadCallsGroup.leave()
+                }
             }
         }
     }
     
     func getUrl(endpoint: String) -> URL {
         let urlTemplate: String?
+        var params = ""
         switch endpoint {
         case "save":
-            urlTemplate = SAVE_URL
+            urlTemplate = ViewController.SAVE_URL
         case "check":
-            urlTemplate = CHECK_URL
+            urlTemplate = ViewController.CHECK_URL
         case "health":
-            urlTemplate = HEALTH_URL
+            urlTemplate = ViewController.HEALTH_URL
+        case "timestamps":
+            urlTemplate = ViewController.TIMESTAMPS_URL
+            params = "?u=" + user + "&p=" + ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL
         default:
             urlTemplate = nil
         }
-        return URL(string: urlTemplate!.replacingOccurrences(of: "{host}", with: (ENV == "dev" ? LOCALHOST : SERVER)))!
+        return URL(string: (urlTemplate!.replacingOccurrences(of: "{host}", with: (ViewController.ENV == "dev" ? ViewController.LOCALHOST : ViewController.SERVER)) + params))!
     }
 
-    func upload(img: UIImage, count: Int, total: Int, timestamp: Int, latitude: Double?, longitude: Double?, isFavorite: Bool, album: String) {
+    func getTimestamps() {
+        // Get request ready
+        timestamps = [:]
+        let sesh = URLSession(configuration: .default)
+        var req = URLRequest(url: getUrl(endpoint: "timestamps"))
+        req.httpMethod = "GET"
+        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
+            DispatchQueue.main.async {
+                if let data = data, let jsonData = try? JSONSerialization.jsonObject(with: data, options: .mutableContainers), let timestamps = jsonData as? [String: [String]] {
+                    for (t, arr) in timestamps {
+                        self.timestamps[UInt64(t)!] = arr
+                    }
+                }
+            }
+            self.semaphore.signal()
+        }).resume()
+    }
+
+    func upload(img: UIImage, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, album: String, sha256: String) {
         let url = getUrl(endpoint: "save")
 
         // Get request ready
@@ -130,7 +175,7 @@ class ViewController: UIViewController {
         let imgBase64 = img.pngData()?.base64EncodedString()
         let jsonObj: [String: Any?] = [
             "a": album, // second part of relative path on server
-            "p": HARD_CODED_PASSWORD_HOW_SHAMEFUL,
+            "p": ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL,
             "i": imgBase64,  // image data
 
             "u": user,  // user name, used as first path of relative path on server where photos will be stored
@@ -138,28 +183,17 @@ class ViewController: UIViewController {
             "lat": latitude,
             "long": longitude,
             "f": isFavorite,
+            "s": sha256,
         ]
         let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: [])
         req.httpBody = data
         _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
             DispatchQueue.main.async {
-                if error == nil && (response as! HTTPURLResponse).statusCode == 200 {
-                    print ("Successful upload!")
-                    self.statusMessage.text = self.UPLOADED_IMAGE_MSG.replacingOccurrences(of: "{total}", with: String(total)).replacingOccurrences(of: "{number}", with: String(count))
-                } else {
-                    print ("Upload failed.")
-                    print ("  Error:", error ?? "nil error")
+                if error != nil || (response as! HTTPURLResponse).statusCode != 200 {
+                    print ("Upload failed. Error:", error ?? "nil error")
                     self.failedUploadCount += 1
-                    self.statusMessage.text = self.UPLOAD_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(total)).replacingOccurrences(of: "{number}", with: String(count))
                 }
-                self.previewImage.image = img
-                if (count == total) {
-                    if (self.failedUploadCount > 0) {
-                        self.statusMessage.text = self.SOME_UPLOADS_FAILED.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount))
-                    } else {
-                        self.statusMessage.text = self.UPLOAD_FINISHED_MSG
-                    }
-                }
+                self.uploadCallsGroup.leave()
             }
         }).resume()
     }
@@ -167,18 +201,27 @@ class ViewController: UIViewController {
 
 // Handlers for buttons
 extension ViewController {
-    @IBAction func findNewPhotosHandler(_ sender: Any, forEvent event: UIEvent) {
+    @IBAction func uploadPhotosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        let album = albumField.text ?? ViewController.DEFAULT_ALBUM_NAME
         getPhotos()
-    }
-    
-    @IBAction func findNewVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
-        // getVideos()
-    }
-    
-    @IBAction func uploadHandler(_ sender: UIButton, forEvent event: UIEvent) {
-        let album = albumField.text ?? DEFAULT_ALBUM_NAME
         DispatchQueue.global(qos: .background).async {
+            self.getTimestamps()
+            _ = self.semaphore.wait(wallTimeout: .distantFuture)
             self.startUpload(album: album)
+
+            // Show final status message
+            self.uploadCallsGroup.notify(queue: .main) {
+                let duplicatesMsg = self.duplicates > 0 ? " " + ViewController.FINAL_DUPLICATES_MSG.replacingOccurrences(of: "{duplicates}", with: String(self.duplicates)).replacingOccurrences(of: "{server}", with: ViewController.SERVER) : ""
+                if (self.failedUploadCount > 0) {
+                    self.statusMessage.text = ViewController.SOME_UPLOADS_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount)) + duplicatesMsg
+                } else {
+                    self.statusMessage.text = ViewController.UPLOAD_FINISHED_MSG + duplicatesMsg
+                }
+            }
         }
+    }
+
+    @IBAction func uploadVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        print("shietttt")
     }
 }

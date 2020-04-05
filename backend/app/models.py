@@ -2,6 +2,8 @@ from app import db
 import json
 from datetime import datetime
 
+SHA256_LEN = 64
+
 class ImageRow(db.Model):
     '''Define table of image metadata rows'''
 
@@ -12,17 +14,10 @@ class ImageRow(db.Model):
     locationLongitude = db.Column(db.Float, nullable=True)  # e.g. -118.335
     isFavorite = db.Column(db.Boolean)  # based on selection in iOS photos app
     absoluteFilename = db.Column(db.String(256))
+    sha256 = db.Column(db.String(64), index=True)
 
     def __repr__(self):
-        return 'Img {} was taken at {}s by {} at ({}, {}). It was{}a fave. File: {}'.format(
-            self.id,
-            self.creationTimestamp,
-            self.user,
-            self.locationLatitude,
-            self.locationLongitude,
-            ' ' if self.isFavorite else ' not ',
-            self.absoluteFilename
-        )
+        return str(self.toDict())
 
     def toDict(self):
         return {
@@ -30,11 +25,12 @@ class ImageRow(db.Model):
             'user': self.user,
             'timestamp': self.creationTimestamp,
             'location': {
-                'x': self.locationLatitude,
-                'y': self.locationLongitude
+                'latitude': self.locationLatitude,
+                'longitude': self.locationLongitude
             },
             'isFavorite': self.isFavorite,
-            'absoluteFilename': self.absoluteFilename
+            'absoluteFilename': self.absoluteFilename,
+            'imageHash': self.sha256
         }
 
     @classmethod
@@ -46,7 +42,8 @@ class ImageRow(db.Model):
             locationLatitude=rowDict.get('locationLatitude'),
             locationLongitude=rowDict.get('locationLongitude'),
             isFavorite=rowDict.get('isFavorite'),
-            absoluteFilename=rowDict.get('absoluteFilename')
+            absoluteFilename=rowDict.get('absoluteFilename'),
+            sha256=rowDict.get('sha256')
         )
 
     @classmethod
@@ -60,6 +57,7 @@ class ImageRow(db.Model):
         locationX = rowJson.get('location') and rowJson.get('location').get('x')
         locationY = rowJson.get('location') and rowJson.get('location').get('y')        
         absoluteFilename = rowJson.get('absoluteFilename')
+        sha256 = rowJson.get('sha256')
         return (id is not None and type(id) == str
             and user is not None and type(user) == str
             and timestamp is not None and type(timestamp) == int
@@ -67,4 +65,5 @@ class ImageRow(db.Model):
             and (type(locationX) == float if locationX is not None else True)
             and (type(locationY) == float if locationY is not None else True)
             and absoluteFilename is not None and type(absoluteFilename) == str
+            and sha256 is not None and type(sha256) == str and len(sha256) == SHA256_LEN
         )

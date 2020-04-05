@@ -13,6 +13,7 @@ USER_DIRECTORY = '{root}/{user}'
 DIRECTORY_TO_WRITE_FILES = '{userdir}/{album}'
 ABS_FILENAME = '{dir}/{filename}'
 FAVORITES_DIR_NAME = 'favorites'
+DEFAULT_ALBUM = 'default'
 
 def makeError(statusCode, msg=''):
     ret = jsonify({
@@ -22,11 +23,27 @@ def makeError(statusCode, msg=''):
     ret.status_code = statusCode
     return ret
 
-
 @app.route('/health')
 def health():
     return jsonify('ok')
 
+@app.route('/timestamps', methods=['GET'])
+def getTimestamps():
+    password = request.args.get('p')
+    if password != PW:
+        return makeError(500, 'pwnd')
+
+    user = request.args.get('u')
+    ret = {}
+    for row in models.ImageRow.query.all():
+        if user != row.user:
+            continue
+        timestamp = row.creationTimestamp
+        sha256 = row.sha256
+        if ret.get(timestamp) is None:
+            ret[timestamp] = []
+        ret[timestamp].append(sha256)
+    return jsonify(ret)
 
 @app.route('/save', methods=['POST'])
 def uploadImage():
@@ -36,6 +53,10 @@ def uploadImage():
     albumName = content.get('a')
     password = content.get('p')
     imageData = content.get('i')
+
+    if albumName is None:
+        albumName = DEFAULT_ALBUM
+    albumName = '_'.join(albumName.strip().split())
 
     if password != PW:
         return makeError(500, 'pwnd')
@@ -47,7 +68,8 @@ def uploadImage():
         'creationTimestamp': content.get('t'),
         'locationLatitude': content.get('lat'),
         'locationLongitude': content.get('long'),
-        'isFavorite': content.get('f')
+        'isFavorite': content.get('f'),
+        'sha256': content.get('s')
     }
     relativeFilename = FILENAME_FORMAT.format(
         timestamp=rowDict.get('creationTimestamp'),
