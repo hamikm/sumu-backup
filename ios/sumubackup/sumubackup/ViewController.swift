@@ -10,15 +10,15 @@ import UIKit
 import Photos
 
 // TODO:
-// check if health endpoint call succeeds. if not, say something is wrong with server
 // check if this works when app is backgrounded...
-// finish new done with uploads status message down below
 
 class ViewController: UIViewController {
     
     @IBOutlet weak var statusMessage: UILabel!
     @IBOutlet weak var albumField: UITextField!
     @IBOutlet weak var previewImage: UIImageView!
+    @IBOutlet weak var uploadPhotosButton: UIButton!
+    @IBOutlet weak var uploadVideosButton: UIButton!
 
     var images = [UIImage]()
     var results: PHFetchResult<PHAsset>?
@@ -27,9 +27,22 @@ class ViewController: UIViewController {
     var timestamps: [UInt64: [String]] = [:]
     var semaphore = DispatchSemaphore(value: 0)
     var uploadCallsGroup = DispatchGroup()
+    var isServerOnline = false {
+        didSet {
+            if isServerOnline {
+                uploadPhotosButton.isEnabled = true
+                uploadVideosButton.isEnabled = true
+                statusMessage.text = ViewController.WELCOME_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
+            } else {
+                statusMessage.text = ViewController.SERVER_OFFLINE_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
+            }
+        }
+    }
 
     var user: String = "vicky"
     
+    static let CHECKING_SERVER_MSG = "Checking if {server} is online..."
+    static let SERVER_OFFLINE_MSG = "{server} is offline."
     static let WELCOME_MSG = "Upload iPhone media to {server}!"
     static let STARTING_UPLOAD = "Starting upload..."
     static let UPLOADING_IMAGE_MSG = "Uploading image {number} of {total}..."
@@ -42,7 +55,6 @@ class ViewController: UIViewController {
     static let LOCALHOST = "0.0.0.0"
     static let SERVER = "vingilot"
     static let SAVE_URL = "http://{host}:9090/save"
-    static let CHECK_URL = "http://{host}:9090/check"
     static let HEALTH_URL = "http://{host}:9090/health"
     static let TIMESTAMPS_URL = "http://{host}:9090/timestamps"
 
@@ -55,11 +67,12 @@ class ViewController: UIViewController {
 
         statusMessage.numberOfLines = 10
         statusMessage.lineBreakMode = .byWordWrapping
-        statusMessage.text = ViewController.WELCOME_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
-
+        statusMessage.text = ViewController.CHECKING_SERVER_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
         if UIDevice.current.name.lowercased() == "goldberry" {
             user = "hamik"
         }
+
+        checkIsServerOnline()
     }
     
     func getPhotos() {
@@ -100,7 +113,6 @@ class ViewController: UIViewController {
         }
 
         for i in 0..<results!.count {
-            print("Waiting for upload of image", i - 1)
             let asset = results!.object(at: i)
             let t = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
             let lat = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
@@ -130,16 +142,16 @@ class ViewController: UIViewController {
     func getUrl(endpoint: String) -> URL {
         let urlTemplate: String?
         var params = ""
+        let passParam = "?p=" + ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL
         switch endpoint {
         case "save":
             urlTemplate = ViewController.SAVE_URL
-        case "check":
-            urlTemplate = ViewController.CHECK_URL
         case "health":
             urlTemplate = ViewController.HEALTH_URL
+            params = passParam
         case "timestamps":
             urlTemplate = ViewController.TIMESTAMPS_URL
-            params = "?u=" + user + "&p=" + ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL
+            params = passParam + "&u=" + user
         default:
             urlTemplate = nil
         }
@@ -147,7 +159,6 @@ class ViewController: UIViewController {
     }
 
     func getTimestamps() {
-        // Get request ready
         timestamps = [:]
         let sesh = URLSession(configuration: .default)
         var req = URLRequest(url: getUrl(endpoint: "timestamps"))
@@ -164,10 +175,23 @@ class ViewController: UIViewController {
         }).resume()
     }
 
+    func checkIsServerOnline() {
+        let sesh = URLSession(configuration: .default)
+        var req = URLRequest(url: getUrl(endpoint: "health"))
+        req.httpMethod = "GET"
+        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
+            DispatchQueue.main.async {
+                if error == nil {
+                    self.isServerOnline = true
+                } else {
+                    self.isServerOnline = false
+                }
+            }
+        }).resume()
+    }
+
     func upload(img: UIImage, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, album: String, sha256: String) {
         let url = getUrl(endpoint: "save")
-
-        // Get request ready
         let sesh = URLSession(configuration: .default)
         var req = URLRequest(url: url)
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")

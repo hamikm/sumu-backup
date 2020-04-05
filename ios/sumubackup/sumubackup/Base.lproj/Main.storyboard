@@ -30,14 +30,14 @@
                                     <constraint firstAttribute="height" constant="235" id="wXS-0r-fvf"/>
                                 </constraints>
                             </imageView>
-                            <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="10J-aE-eEU">
+                            <button opaque="NO" contentMode="scaleToFill" enabled="NO" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="10J-aE-eEU">
                                 <rect key="frame" x="120" y="445" width="174" height="30"/>
                                 <state key="normal" title="Upload Photos"/>
                                 <connections>
                                     <action selector="uploadPhotosHandler:forEvent:" destination="BYZ-38-t0r" eventType="touchUpInside" id="gqd-A6-pWc"/>
                                 </connections>
                             </button>
-                            <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="aeR-ZO-N6f">
+                            <button opaque="NO" contentMode="scaleToFill" enabled="NO" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="aeR-ZO-N6f">
                                 <rect key="frame" x="120" y="483" width="174" height="30"/>
                                 <state key="normal" title="Upload Videos"/>
                                 <connections>
@@ -74,6 +74,8 @@
                         <outlet property="albumField" destination="i0J-sI-TfS" id="lhO-c9-Pk2"/>
                         <outlet property="previewImage" destination="HPv-5w-xrK" id="VHi-4y-uQP"/>
                         <outlet property="statusMessage" destination="Qcn-rH-bqG" id="CFX-Ed-bVM"/>
+                        <outlet property="uploadPhotosButton" destination="10J-aE-eEU" id="tH4-3S-F1J"/>
+                        <outlet property="uploadVideosButton" destination="aeR-ZO-N6f" id="2Vb-6I-9FA"/>
                     </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="dkx-z0-nzr" sceneMemberID="firstResponder"/>

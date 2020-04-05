@@ -25,6 +25,9 @@ def makeError(statusCode, msg=''):
 
 @app.route('/health')
 def health():
+    password = request.args.get('p')
+    if password != PW:
+        return makeError(500, 'pwnd')
     return jsonify('ok')
 
 @app.route('/timestamps', methods=['GET'])
