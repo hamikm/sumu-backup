@@ -10,7 +10,6 @@ import UIKit
 import Photos
 
 // TODO
-// 0. app is using too much memory...
 // 1. getVideos, figure out how to store those lol
 // 2. get rid of TODOs below
 class ViewController: UIViewController {
@@ -115,27 +114,29 @@ class ViewController: UIViewController {
         }
 
         for i in 0..<min(results!.count, 100) { // TODO remove min
-            let asset = results!.object(at: i)
-            let t = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
-            let lat = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
-            let long = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
-            let f = asset.isFavorite
+            autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
+                let asset = results!.object(at: i)
+                let t = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
+                let lat = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
+                let long = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
+                let f = asset.isFavorite
 
-            manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
-                let sha256 = img!.sha256()
-                self.uploadCallsGroup.enter()
-                DispatchQueue.main.async { self.previewImage.image = img! }
-                if self.shouldUpload(timestamp: t, sha256: sha256) {
-                    DispatchQueue.main.async {
-                        self.statusMessage.text = ViewController.UPLOADING_IMAGE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
+                manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
+                    let sha256 = img!.sha256()
+                    self.uploadCallsGroup.enter()
+                    DispatchQueue.main.async { self.previewImage.image = img! }
+                    if self.shouldUpload(timestamp: t, sha256: sha256) {
+                        DispatchQueue.main.async {
+                            self.statusMessage.text = ViewController.UPLOADING_IMAGE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
+                        }
+                        self.upload(img: img!, timestamp: t, latitude: lat, longitude: long, isFavorite: f, album: album, sha256: sha256)
+                    } else {
+                        self.duplicates += 1
+                        DispatchQueue.main.async {
+                            self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
+                        }
+                        self.uploadCallsGroup.leave()
                     }
-                    self.upload(img: img!, timestamp: t, latitude: lat, longitude: long, isFavorite: f, album: album, sha256: sha256)
-                } else {
-                    self.duplicates += 1
-                    DispatchQueue.main.async {
-                        self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(i + 1)).replacingOccurrences(of: "{total}", with: String(self.results!.count))
-                    }
-                    self.uploadCallsGroup.leave()
                 }
             }
         }
@@ -250,5 +251,13 @@ extension ViewController {
 
     @IBAction func uploadVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
         print("shietttt")
+    }
+
+    @IBAction func albumEnteredHandler(_ sender: UITextField, forEvent event: UIEvent) {
+        albumField.resignFirstResponder()
+    }
+
+    @IBAction func tapHandler(_ sender: UITapGestureRecognizer) {
+        albumField.resignFirstResponder()
     }
 }

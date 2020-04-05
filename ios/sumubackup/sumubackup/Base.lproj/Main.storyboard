@@ -48,9 +48,13 @@
                                 <rect key="frame" x="20" y="403" width="374" height="34"/>
                                 <fontDescription key="fontDescription" type="system" pointSize="14"/>
                                 <textInputTraits key="textInputTraits"/>
+                                <connections>
+                                    <action selector="albumEnteredHandler:forEvent:" destination="BYZ-38-t0r" eventType="primaryActionTriggered" id="F5P-KH-qvd"/>
+                                </connections>
                             </textField>
                         </subviews>
                         <color key="backgroundColor" systemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
+                        <gestureRecognizers/>
                         <constraints>
                             <constraint firstItem="HPv-5w-xrK" firstAttribute="top" secondItem="6Tk-OE-BBY" secondAttribute="top" id="1Os-Js-gLB"/>
                             <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="10J-aE-eEU" secondAttribute="trailing" constant="120" id="2vn-g8-5oB"/>
@@ -69,6 +73,9 @@
                             <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="i0J-sI-TfS" secondAttribute="bottom" constant="8" id="yzi-2F-Dpb"/>
                         </constraints>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
+                        <connections>
+                            <outletCollection property="gestureRecognizers" destination="cgl-b5-IaA" appends="YES" id="TVc-68-Izv"/>
+                        </connections>
                     </view>
                     <connections>
                         <outlet property="albumField" destination="i0J-sI-TfS" id="lhO-c9-Pk2"/>
@@ -79,6 +86,11 @@
                     </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="dkx-z0-nzr" sceneMemberID="firstResponder"/>
+                <tapGestureRecognizer id="cgl-b5-IaA">
+                    <connections>
+                        <action selector="tapHandler:" destination="BYZ-38-t0r" id="M95-UH-t7s"/>
+                    </connections>
+                </tapGestureRecognizer>
             </objects>
             <point key="canvasLocation" x="137.68115942028987" y="137.94642857142856"/>
         </scene>
