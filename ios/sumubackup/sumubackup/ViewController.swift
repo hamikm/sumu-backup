@@ -9,9 +9,10 @@
 import UIKit
 import Photos
 
-// TODO:
-// check if this works when app is backgrounded...
-
+// TODO
+// 0. app is using too much memory...
+// 1. getVideos, figure out how to store those lol
+// 2. get rid of TODOs below
 class ViewController: UIViewController {
     
     @IBOutlet weak var statusMessage: UILabel!
@@ -51,9 +52,9 @@ class ViewController: UIViewController {
     static let FINAL_DUPLICATES_MSG = "Did not upload {duplicates} images because they were already on {server}."
     static let DUPLICATE_MSG = "Image {number} of {total} is already on the server!"
 
-    static let ENV = "dev"
+    static let ENV = "prod" // TODO set
     static let LOCALHOST = "0.0.0.0"
-    static let SERVER = "vingilot"
+    static let SERVER = "galadriel"  // TODO set
     static let SAVE_URL = "http://{host}:9090/save"
     static let HEALTH_URL = "http://{host}:9090/health"
     static let TIMESTAMPS_URL = "http://{host}:9090/timestamps"
@@ -65,6 +66,7 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         // Do any additional setup after loading the view.
 
+        UIApplication.shared.isIdleTimerDisabled = true
         statusMessage.numberOfLines = 10
         statusMessage.lineBreakMode = .byWordWrapping
         statusMessage.text = ViewController.CHECKING_SERVER_MSG.replacingOccurrences(of: "{server}", with: ViewController.SERVER)
@@ -94,7 +96,7 @@ class ViewController: UIViewController {
         return false
     }
     
-    func startUpload(album: String) {
+    func startUploads(album: String) {
         if results == nil {
             return
         }
@@ -112,7 +114,7 @@ class ViewController: UIViewController {
             self.statusMessage.text = ViewController.STARTING_UPLOAD
         }
 
-        for i in 0..<results!.count {
+        for i in 0..<min(results!.count, 100) { // TODO remove min
             let asset = results!.object(at: i)
             let t = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
             let lat = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
@@ -155,7 +157,8 @@ class ViewController: UIViewController {
         default:
             urlTemplate = nil
         }
-        return URL(string: (urlTemplate!.replacingOccurrences(of: "{host}", with: (ViewController.ENV == "dev" ? ViewController.LOCALHOST : ViewController.SERVER)) + params))!
+        let urlString = (urlTemplate!.replacingOccurrences(of: "{host}", with: (ViewController.ENV == "dev" ? ViewController.LOCALHOST : ViewController.SERVER)) + params)
+        return URL(string: urlString)!
     }
 
     func getTimestamps() {
@@ -231,7 +234,7 @@ extension ViewController {
         DispatchQueue.global(qos: .background).async {
             self.getTimestamps()
             _ = self.semaphore.wait(wallTimeout: .distantFuture)
-            self.startUpload(album: album)
+            self.startUploads(album: album)
 
             // Show final status message
             self.uploadCallsGroup.notify(queue: .main) {
