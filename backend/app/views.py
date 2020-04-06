@@ -6,7 +6,7 @@ import pathlib
 import os
 
 PW = 'beeblesissuchameerkat'
-ROOT_DIR = '/Users/Mukelyan/sandbox/sumu-backup/backend'  # TODO update for server
+ROOT_DIR = '/opt/plexmedia'
 IMG_EXTENSION = 'png'
 VIDEO_EXTENSION = 'mp4'
 FILENAME_FORMAT = '{timestamp}_{uuid}.{extension}'
