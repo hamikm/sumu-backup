@@ -1,4 +1,7 @@
-test.png
 hamik*
 vicky*
 *.db
+env
+__pycache__
+*\~
+\#*

@@ -4,7 +4,8 @@ You need `python3` and `pipenv`.
 1. Clone repo
 2. `pipenv --three shell` — starts virtual environment
 3. `pipenv install` — installs everything in `Pipfile` in virtual environment
-3. `python serve.py` — runs server in virtual environment
+4. `python serve.py` — runs server in virtual environment
+5. Set up a cronjob to check if the web server is up and start it if it isn't. This is necessary because processes can spontaneously die for various reasons. E.g., `*/1 * * * * <path prefix>/sumu-backup/backend/start_sumu_backup.sh` will do a health check every minute and start the server if necessary.
 
 ## When updates require dependency changes
 1. `pipenv --three shell` — starts virtual environment
