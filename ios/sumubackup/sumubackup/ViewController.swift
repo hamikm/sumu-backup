@@ -9,12 +9,13 @@
 import UIKit
 import Photos
 
-// TODO get rid of TODOs below
 class ViewController: UIViewController {
     
+    @IBOutlet weak var previewImage: UIImageView!
     @IBOutlet weak var statusMessage: UILabel!
     @IBOutlet weak var albumField: UITextField!
-    @IBOutlet weak var previewImage: UIImageView!
+    @IBOutlet weak var totalPages: UITextField!
+    @IBOutlet weak var pageToUpload: UITextField!
     @IBOutlet weak var uploadPhotosButton: UIButton!
     @IBOutlet weak var uploadVideosButton: UIButton!
 
@@ -46,14 +47,15 @@ class ViewController: UIViewController {
     static let WELCOME_MSG = "Upload iPhone media to {server}!"
     static let STARTING_UPLOAD = "Starting upload..."
     static let UPLOADING_MEDIA_MSG = "Uploading {type} {number} of {total}..."
-    static let UPLOADS_FINISHED_MSG = "Uploads finished. Double check Plex for {type}; if they're there, you can delete them from your phone."
+    static let UPLOADS_FINISHED_MSG = "Page {page} uploads finished. Check Plex for your {type}; if they're there, you can delete them from your phone."
     static let SOME_UPLOADS_FAILED_MSG = "{number} of {total} uploads failed. Careful when you delete {type} from your phone!"
     static let FINAL_DUPLICATES_MSG = "Did not upload {duplicates} {type} because they were already on {server}."
     static let DUPLICATE_MSG = "{type} {number} of {total} is already on the server!"
+    static let TOO_MANY_ASSETS_MSG = "You can upload at most {max} {type} at once; you have {number}. Choose \"Total Pages\", set \"Page to Upload\" to 1, then upload. After uploading, change it to 2 and upload. When it equals \"Total Pages\", we'll try all {type} to make sure none are missed."
 
-    static let ENV = "prod" // TODO set
+    static let ENV = "prod"  // set to "dev" to call API at http://localhost:9090
     static let LOCALHOST = "0.0.0.0"
-    static let SERVER = "galadriel"  // TODO set
+    static let SERVER = "vingilot"
     static let SAVE_URL = "http://{host}:9090/save"
     static let HEALTH_URL = "http://{host}:9090/health"
     static let TIMESTAMPS_URL = "http://{host}:9090/timestamps"
@@ -61,6 +63,7 @@ class ViewController: UIViewController {
     static let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
     static let DEFAULT_ALBUM_NAME = "default"
     static let RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS = DispatchTimeInterval.seconds(5)
+    static let TOO_MANY_MEDIA_THRESHOLD = 1000
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -77,12 +80,20 @@ class ViewController: UIViewController {
         checkIsServerOnline()
     }
     
-    func getMedia(mediaType: PHAssetMediaType) {
+    // Returns false if not going to proceed until user gives a better page total and page number
+    func getMedia(mediaType: PHAssetMediaType) -> Bool {
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         fetchOptions.includeAllBurstAssets = false
         fetchOptions.includeAssetSourceTypes = [.typeCloudShared, .typeUserLibrary, .typeiTunesSynced]
         results = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
+
+        let totalNumberOfPages = getTotalPages()
+        let pageSize = results!.count / totalNumberOfPages
+        if pageSize > ViewController.TOO_MANY_MEDIA_THRESHOLD {
+            return false
+        }
+        return true
     }
 
     func shouldUpload(timestamp: UInt64, sha256: String) -> Bool {
@@ -184,7 +195,7 @@ class ViewController: UIViewController {
         }
     }
 
-    func startUploads(album: String, mediaType: PHAssetMediaType) {
+    func startUploads(album: String, mediaType: PHAssetMediaType, totalNumberOfPages: Int, pageNum: Int) {
         if results == nil {
             return
         }
@@ -195,7 +206,10 @@ class ViewController: UIViewController {
             self.statusMessage.text = ViewController.STARTING_UPLOAD
         }
 
-        for i in 0..<min(results!.count, 100) { // TODO remove min
+        // Get the range of indices that constitute this page. Try all images for the last page to make sure none are missed, since the user might take more photos between uploads of pages < totalNumberOfPages.
+        let numAssetsInPage = results!.count / totalNumberOfPages
+        let pageRange = pageNum != totalNumberOfPages ? (numAssetsInPage * (pageNum - 1))..<(numAssetsInPage * pageNum) : 0..<results!.count
+        for i in pageRange {
             autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
                 let asset = results!.object(at: i)
                 let t = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
@@ -300,18 +314,33 @@ class ViewController: UIViewController {
     func getAlbumString() -> String {
         return (albumField.text == nil || albumField.text!.count == 0) ? ViewController.DEFAULT_ALBUM_NAME : albumField.text!
     }
+
+    func getTotalPages() -> Int {
+        return max((totalPages.text == nil || totalPages.text!.count == 0) ? 1 : Int(totalPages.text!)!, 1)
+    }
+
+    func getPageToUpload() -> Int {
+        return max(min((pageToUpload.text == nil || pageToUpload.text!.count == 0) ? 1 : Int(pageToUpload.text!)!, getTotalPages()), 1)
+    }
 }
 
 // Handlers for buttons
 extension ViewController {
     func getMediaThenUpload(mediaType: PHAssetMediaType) {
-        getMedia(mediaType: mediaType)
+        guard getMedia(mediaType: mediaType) else {
+            statusMessage.text = ViewController.TOO_MANY_ASSETS_MSG.replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "videos")).replacingOccurrences(of: "{number}", with: String(results!.count)).replacingOccurrences(of: "{max}", with: String(ViewController.TOO_MANY_MEDIA_THRESHOLD))
+            return
+        }
+        uploadPhotosButton.isEnabled = false
+        uploadVideosButton.isEnabled = false
         let album = getAlbumString()
+        let totalNumberOfPages = getTotalPages()
+        let pageNum = getPageToUpload()
 
         DispatchQueue.global(qos: .background).async {
             self.getTimestamps()
             _ = self.semaphore.wait(wallTimeout: .distantFuture)
-            self.startUploads(album: album, mediaType: mediaType)
+            self.startUploads(album: album, mediaType: mediaType, totalNumberOfPages: totalNumberOfPages, pageNum: pageNum)
 
             // Show final status message
             self.uploadCallsGroup.notify(queue: .main) {
@@ -319,8 +348,10 @@ extension ViewController {
                 if (self.failedUploadCount > 0) {
                     self.statusMessage.text = ViewController.SOME_UPLOADS_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount)).replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "video")) + duplicatesMsg
                 } else {
-                    self.statusMessage.text = ViewController.UPLOADS_FINISHED_MSG.replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "videos")) + duplicatesMsg
+                    self.statusMessage.text = ViewController.UPLOADS_FINISHED_MSG.replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "videos")).replacingOccurrences(of: "{page}", with: String(pageNum)) + duplicatesMsg
                 }
+                self.uploadPhotosButton.isEnabled = true
+                self.uploadVideosButton.isEnabled = true
             }
         }
     }
@@ -333,11 +364,19 @@ extension ViewController {
         getMediaThenUpload(mediaType: .video)
     }
 
+    @IBAction func tapHandler(_ sender: UITapGestureRecognizer) {
+        albumField.resignFirstResponder()
+        totalPages.resignFirstResponder()
+        pageToUpload.resignFirstResponder()
+    }
+
     @IBAction func albumEnteredHandler(_ sender: UITextField, forEvent event: UIEvent) {
         albumField.resignFirstResponder()
     }
-
-    @IBAction func tapHandler(_ sender: UITapGestureRecognizer) {
-        albumField.resignFirstResponder()
+    @IBAction func totalPagesEnteredHandler(_ sender: UITextField, forEvent event: UIEvent) {
+        totalPages.resignFirstResponder()
+    }
+    @IBAction func pageToUploadHandler(_ sender: UITextField, forEvent event: UIEvent) {
+        pageToUpload.resignFirstResponder()
     }
 }
