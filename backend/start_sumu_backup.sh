@@ -1,4 +1,4 @@
-if ps ax | grep -v grep | grep "python serve.py" > /dev/null
+if ps ax | grep -v grep | grep "python3 serve.py" > /dev/null
 then
     exit
 else
