@@ -9,6 +9,7 @@
 import UIKit
 import Photos
 
+// TODO: need some chunking upload system when mediaB64 is too large to fit in memory...
 class ViewController: UIViewController {
     
     @IBOutlet weak var previewImage: UIImageView!
@@ -96,12 +97,15 @@ class ViewController: UIViewController {
         return true
     }
 
-    func shouldUpload(timestamp: UInt64, sha256: String) -> Bool {
+    func shouldUpload(timestamp: UInt64, sha256: String?, skipHashComparison: Bool = false) -> Bool {
         let hashesForTimestamp = self.timestamps[timestamp]
-        if hashesForTimestamp == nil {
+        if hashesForTimestamp == nil || hashesForTimestamp?.count == 0 {
             return true
         }
-        if hashesForTimestamp!.firstIndex(of: sha256) == nil {
+        if (skipHashComparison) {
+            return false
+        }
+        if hashesForTimestamp!.firstIndex(of: sha256!) == nil {
             return true
         }
         return false
@@ -119,6 +123,7 @@ class ViewController: UIViewController {
             guard let img = img else {
                 print ("Image was nil")
                 self.uploadCallsGroup.leave()
+                self.semaphore.signal()
                 return
             }
 
@@ -136,6 +141,7 @@ class ViewController: UIViewController {
                     self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "Image")
                 }
                 self.uploadCallsGroup.leave()
+                self.semaphore.signal()
             }
         }
     }
@@ -143,7 +149,7 @@ class ViewController: UIViewController {
     func getThumbnail(videoAsset: AVAsset) -> UIImage? {
         let thumbnailGenerator = AVAssetImageGenerator(asset: videoAsset)
         thumbnailGenerator.appliesPreferredTrackTransform = true
-        let midpointTime = CMTimeMakeWithSeconds(videoAsset.duration.seconds / 2 * 600, preferredTimescale: 600)
+        let midpointTime = CMTimeMakeWithSeconds(1, preferredTimescale: 600)
         do {
             let img = try thumbnailGenerator.copyCGImage(at: midpointTime, actualTime: nil)
             let thumbnail = UIImage(cgImage: img)
@@ -151,6 +157,34 @@ class ViewController: UIViewController {
         } catch {
             print(error.localizedDescription)
             return nil
+        }
+    }
+
+    func pullVideoAssetFromUrlAndUpload(url: URL, videoAsset: AVAsset, album: String, assetNum: Int, t: UInt64, lat: Double?, long: Double?, f: Bool) {
+        guard let videoData = try? Data(contentsOf: url) else {
+            print("Unable to get video data! :-(")
+            self.uploadCallsGroup.leave()
+            self.semaphore.signal()
+            return
+        }
+
+        let thumbnailPreview = self.getThumbnail(videoAsset: videoAsset)
+        let sha256 = videoData.sha256()
+
+        DispatchQueue.main.async { self.previewImage.image = thumbnailPreview }
+        if self.shouldUpload(timestamp: t, sha256: sha256) {
+            DispatchQueue.main.async {
+                self.statusMessage.text = ViewController.UPLOADING_MEDIA_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "video")
+            }
+            let videoB64 = videoData.base64EncodedString()
+            self.sendMediaOverWire(album: album, mediaB64: videoB64, timestamp: t, latitude: lat, longitude: long, isFavorite: f, sha256: sha256, mediaType: .video)
+        } else {
+            self.duplicates += 1
+            DispatchQueue.main.async {
+                self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "Video")
+            }
+            self.uploadCallsGroup.leave()
+            self.semaphore.signal()
         }
     }
 
@@ -164,32 +198,37 @@ class ViewController: UIViewController {
             guard let videoAsset = videoAsset else {
                 print ("Nil video asset")
                 self.uploadCallsGroup.leave()
+                self.semaphore.signal()
                 return
             }
 
+            // Normal video
             if let assetUrl = videoAsset as? AVURLAsset {
-                guard let videoData = try? Data(contentsOf: assetUrl.url) else {
-                    print("Unable to get video data! :-(")
+                self.pullVideoAssetFromUrlAndUpload(url: assetUrl.url, videoAsset: videoAsset, album: album, assetNum: assetNum, t: t, lat: lat, long: long, f: f)
+            }
+
+            // Slow motion video
+            else if let assetComposition = videoAsset as? AVComposition, assetComposition.tracks.count > 1, let exporter = AVAssetExportSession(asset: assetComposition, presetName: AVAssetExportPresetHighestQuality) {
+
+                // Make sure we need to upload this slow mo video BASED ONLY ON ITS TIMESTAMP before doing a whole much of expensive stuff
+                guard self.shouldUpload(timestamp: t, sha256: nil, skipHashComparison: true) else {
                     self.uploadCallsGroup.leave()
+                    self.semaphore.signal()
                     return
                 }
 
-                let thumbnailPreview = self.getThumbnail(videoAsset: videoAsset)
-                let sha256 = videoData.sha256()
+                // Get temporary url to export slow-mo video to
+                let directory = NSTemporaryDirectory()
+                let fileName = NSUUID().uuidString
+                let fullURL = NSURL.fileURL(withPathComponents: [directory, fileName])
 
-                DispatchQueue.main.async { self.previewImage.image = thumbnailPreview }
-                if self.shouldUpload(timestamp: t, sha256: sha256) {
-                    DispatchQueue.main.async {
-                        self.statusMessage.text = ViewController.UPLOADING_MEDIA_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "video")
+                exporter.outputURL = fullURL
+                exporter.outputFileType = .mp4
+                exporter.canPerformMultiplePassesOverSourceMediaData = true
+                exporter.exportAsynchronously {
+                    DispatchQueue.main.sync {
+                        self.pullVideoAssetFromUrlAndUpload(url: exporter.outputURL!, videoAsset: videoAsset, album: album, assetNum: assetNum, t: t, lat: lat, long: long, f: f)
                     }
-                    let videoB64 = videoData.base64EncodedString()
-                    self.sendMediaOverWire(album: album, mediaB64: videoB64, timestamp: t, latitude: lat, longitude: long, isFavorite: f, sha256: sha256, mediaType: .video)
-                } else {
-                    self.duplicates += 1
-                    DispatchQueue.main.async {
-                        self.statusMessage.text = ViewController.DUPLICATE_MSG.replacingOccurrences(of: "{number}", with: String(assetNum)).replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{type}", with: "Video")
-                    }
-                    self.uploadCallsGroup.leave()
                 }
             }
         }
@@ -223,6 +262,7 @@ class ViewController: UIViewController {
                 } else {
                     handleVideoAsset(album: album, asset: asset, assetNum: i + 1, t: t, lat: lat, long: long, f: f)
                 }
+                _ = semaphore.wait(timeout: .distantFuture)
             }
         }
     }
@@ -298,7 +338,8 @@ class ViewController: UIViewController {
             "s": sha256,
             "v": (mediaType == .image ? false : true)
         ]
-        let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: [])
+        // TODO: need some chunking upload system when mediaB64 is too large to fit in memory...
+        let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: .fragmentsAllowed)
         req.httpBody = data
         _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
             DispatchQueue.main.async {
@@ -308,6 +349,7 @@ class ViewController: UIViewController {
                 }
                 self.uploadCallsGroup.leave()
             }
+            self.semaphore.signal()
         }).resume()
     }
 
@@ -336,6 +378,7 @@ extension ViewController {
         let album = getAlbumString()
         let totalNumberOfPages = getTotalPages()
         let pageNum = getPageToUpload()
+        let itemCount = pageNum == totalNumberOfPages ? results!.count : results!.count / totalNumberOfPages
 
         DispatchQueue.global(qos: .background).async {
             self.getTimestamps()
@@ -346,7 +389,7 @@ extension ViewController {
             self.uploadCallsGroup.notify(queue: .main) {
                 let duplicatesMsg = self.duplicates > 0 ? " " + ViewController.FINAL_DUPLICATES_MSG.replacingOccurrences(of: "{duplicates}", with: String(self.duplicates)).replacingOccurrences(of: "{server}", with: ViewController.SERVER).replacingOccurrences(of: "{type}", with: (mediaType == .image ? "image(s)" : "video(s)")) : ""
                 if (self.failedUploadCount > 0) {
-                    self.statusMessage.text = ViewController.SOME_UPLOADS_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(self.results!.count)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount)).replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "video")) + duplicatesMsg
+                    self.statusMessage.text = ViewController.SOME_UPLOADS_FAILED_MSG.replacingOccurrences(of: "{total}", with: String(itemCount)).replacingOccurrences(of: "{number}", with: String(self.failedUploadCount)).replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "video")) + duplicatesMsg
                 } else {
                     self.statusMessage.text = ViewController.UPLOADS_FINISHED_MSG.replacingOccurrences(of: "{type}", with: (mediaType == .image ? "images" : "videos")).replacingOccurrences(of: "{page}", with: String(pageNum)) + duplicatesMsg
                 }
