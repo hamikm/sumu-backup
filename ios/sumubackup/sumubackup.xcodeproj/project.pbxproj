@@ -17,7 +17,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		4C8BFE9D2431694E0035DCA7 /* sumubackup.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = sumubackup.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4C8BFE9D2431694E0035DCA7 /* Bailey's Backup.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Bailey's Backup.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		4C8BFEA02431694E0035DCA7 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		4C8BFEA42431694E0035DCA7 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
 		4C8BFEA72431694E0035DCA7 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
@@ -52,7 +52,7 @@
 		4C8BFE9E2431694E0035DCA7 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				4C8BFE9D2431694E0035DCA7 /* sumubackup.app */,
+				4C8BFE9D2431694E0035DCA7 /* Bailey's Backup.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,7 +89,7 @@
 			);
 			name = sumubackup;
 			productName = sumubackup;
-			productReference = 4C8BFE9D2431694E0035DCA7 /* sumubackup.app */;
+			productReference = 4C8BFE9D2431694E0035DCA7 /* Bailey's Backup.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -298,7 +298,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sumu.sumubackup;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Bailey's Backup";
 				SWIFT_OBJC_BRIDGING_HEADER = BridgingHeader.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -317,7 +317,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sumu.sumubackup;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Bailey's Backup";
 				SWIFT_OBJC_BRIDGING_HEADER = BridgingHeader.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
