@@ -10,7 +10,7 @@
         <!--View Controller-->
         <scene sceneID="tne-QT-ifu">
             <objects>
-                <viewController id="BYZ-38-t0r" customClass="ViewController" customModule="sumubackup" customModuleProvider="target" sceneMemberID="viewController">
+                <viewController id="BYZ-38-t0r" customClass="ViewController" customModule="Bailey_s_Backup" customModuleProvider="target" sceneMemberID="viewController">
                     <view key="view" contentMode="scaleToFill" id="8bC-Xf-vdC">
                         <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
@@ -31,14 +31,14 @@
                                 </constraints>
                             </imageView>
                             <button opaque="NO" contentMode="scaleToFill" enabled="NO" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="10J-aE-eEU">
-                                <rect key="frame" x="120" y="474" width="174" height="30"/>
+                                <rect key="frame" x="120" y="432" width="174" height="30"/>
                                 <state key="normal" title="Upload Photos"/>
                                 <connections>
                                     <action selector="uploadPhotosHandler:forEvent:" destination="BYZ-38-t0r" eventType="touchUpInside" id="gqd-A6-pWc"/>
                                 </connections>
                             </button>
                             <button opaque="NO" contentMode="scaleToFill" enabled="NO" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="aeR-ZO-N6f">
-                                <rect key="frame" x="120" y="512" width="174" height="30"/>
+                                <rect key="frame" x="120" y="470" width="174" height="30"/>
                                 <state key="normal" title="Upload Videos"/>
                                 <connections>
                                     <action selector="uploadVideosHandler:forEvent:" destination="BYZ-38-t0r" eventType="touchUpInside" id="H3Q-xY-mKP"/>
@@ -52,22 +52,6 @@
                                     <action selector="albumEnteredHandler:forEvent:" destination="BYZ-38-t0r" eventType="primaryActionTriggered" id="iby-ez-3tr"/>
                                 </connections>
                             </textField>
-                            <textField opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" placeholder="Total Pages" textAlignment="natural" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="41b-dW-rlL">
-                                <rect key="frame" x="20" y="432" width="183" height="34"/>
-                                <fontDescription key="fontDescription" type="system" pointSize="14"/>
-                                <textInputTraits key="textInputTraits" keyboardType="numberPad" returnKeyType="done"/>
-                                <connections>
-                                    <action selector="totalPagesEnteredHandler:forEvent:" destination="BYZ-38-t0r" eventType="primaryActionTriggered" id="4bb-8u-2Eg"/>
-                                </connections>
-                            </textField>
-                            <textField opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" placeholder="Page to Upload" textAlignment="natural" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="oKn-aa-jAJ" userLabel="Page to Upload">
-                                <rect key="frame" x="211" y="432" width="183" height="34"/>
-                                <fontDescription key="fontDescription" type="system" pointSize="14"/>
-                                <textInputTraits key="textInputTraits" keyboardType="numberPad" returnKeyType="done"/>
-                                <connections>
-                                    <action selector="pageToUploadHandler:forEvent:" destination="BYZ-38-t0r" eventType="primaryActionTriggered" id="oQY-26-YOH"/>
-                                </connections>
-                            </textField>
                         </subviews>
                         <color key="backgroundColor" systemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
                         <gestureRecognizers/>
@@ -78,24 +62,15 @@
                             <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="Qcn-rH-bqG" secondAttribute="trailing" constant="20" id="5Mq-Ph-GOk"/>
                             <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="i0J-sI-TfS" secondAttribute="trailing" constant="20" id="6OB-eY-nm6"/>
                             <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="aeR-ZO-N6f" secondAttribute="trailing" constant="120" id="6rA-T0-cfj"/>
-                            <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="41b-dW-rlL" secondAttribute="bottom" constant="8" id="Dls-fX-bkL"/>
                             <constraint firstItem="aeR-ZO-N6f" firstAttribute="top" secondItem="10J-aE-eEU" secondAttribute="bottom" constant="8" id="FYR-hW-BnF"/>
                             <constraint firstItem="Qcn-rH-bqG" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="20" id="Ivp-0g-OoF"/>
                             <constraint firstItem="10J-aE-eEU" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="120" id="L8y-Ce-c9n"/>
-                            <constraint firstItem="oKn-aa-jAJ" firstAttribute="width" secondItem="41b-dW-rlL" secondAttribute="width" id="P8e-NQ-XEo"/>
-                            <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="oKn-aa-jAJ" secondAttribute="bottom" constant="8" id="Y56-rO-KLA"/>
-                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="oKn-aa-jAJ" secondAttribute="trailing" constant="20" id="bxt-u2-suP"/>
+                            <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="i0J-sI-TfS" secondAttribute="bottom" constant="8" id="Mo2-nW-Oc4"/>
                             <constraint firstItem="Qcn-rH-bqG" firstAttribute="top" secondItem="HPv-5w-xrK" secondAttribute="bottom" constant="8" id="e3V-iV-Lvc"/>
                             <constraint firstItem="i0J-sI-TfS" firstAttribute="top" secondItem="Qcn-rH-bqG" secondAttribute="bottom" constant="8" id="f8g-Y5-SpY"/>
                             <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="HPv-5w-xrK" secondAttribute="trailing" constant="20" id="fss-ZQ-zYl"/>
-                            <constraint firstItem="oKn-aa-jAJ" firstAttribute="leading" secondItem="41b-dW-rlL" secondAttribute="trailing" constant="8" id="ifK-eP-mC8"/>
                             <constraint firstItem="HPv-5w-xrK" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="20" id="jDw-aK-T9q"/>
                             <constraint firstItem="aeR-ZO-N6f" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="120" id="khb-U1-A3g"/>
-                            <constraint firstItem="oKn-aa-jAJ" firstAttribute="leading" secondItem="41b-dW-rlL" secondAttribute="trailing" constant="8" id="mUa-K0-7Vs"/>
-                            <constraint firstItem="10J-aE-eEU" firstAttribute="top" secondItem="oKn-aa-jAJ" secondAttribute="bottom" constant="8" id="nmT-K4-gIS"/>
-                            <constraint firstItem="41b-dW-rlL" firstAttribute="top" secondItem="i0J-sI-TfS" secondAttribute="bottom" constant="8" id="q2N-n3-su5"/>
-                            <constraint firstItem="oKn-aa-jAJ" firstAttribute="top" secondItem="i0J-sI-TfS" secondAttribute="bottom" constant="8" id="t24-Kt-lQB"/>
-                            <constraint firstItem="41b-dW-rlL" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="20" id="yXt-tA-a5A"/>
                         </constraints>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
                         <connections>
@@ -104,10 +79,8 @@
                     </view>
                     <connections>
                         <outlet property="albumField" destination="i0J-sI-TfS" id="lhO-c9-Pk2"/>
-                        <outlet property="pageToUpload" destination="oKn-aa-jAJ" id="gT3-ME-4KY"/>
                         <outlet property="previewImage" destination="HPv-5w-xrK" id="VHi-4y-uQP"/>
                         <outlet property="statusMessage" destination="Qcn-rH-bqG" id="CFX-Ed-bVM"/>
-                        <outlet property="totalPages" destination="41b-dW-rlL" id="nF2-jb-3fn"/>
                         <outlet property="uploadPhotosButton" destination="10J-aE-eEU" id="tH4-3S-F1J"/>
                         <outlet property="uploadVideosButton" destination="aeR-ZO-N6f" id="2Vb-6I-9FA"/>
                     </connections>

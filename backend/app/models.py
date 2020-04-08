@@ -14,7 +14,6 @@ class MediaMetadata(db.Model):
     locationLongitude = db.Column(db.Float, nullable=True)  # e.g. -118.335
     isFavorite = db.Column(db.Boolean)  # based on selection in iOS photos app
     absoluteFilename = db.Column(db.String(256))
-    sha256 = db.Column(db.String(64), index=True)
     isVideo = db.Column(db.Boolean)
 
     def __repr__(self):
@@ -31,7 +30,6 @@ class MediaMetadata(db.Model):
             },
             'isFavorite': self.isFavorite,
             'absoluteFilename': self.absoluteFilename,
-            'imageHash': self.sha256,
             'isVideo': self.isVideo
         }
 
@@ -45,7 +43,6 @@ class MediaMetadata(db.Model):
             locationLongitude=rowDict.get('locationLongitude'),
             isFavorite=rowDict.get('isFavorite'),
             absoluteFilename=rowDict.get('absoluteFilename'),
-            sha256=rowDict.get('sha256'),
             isVideo=rowDict.get('isVideo')
         )
 
@@ -60,7 +57,6 @@ class MediaMetadata(db.Model):
         locationX = rowJson.get('location') and rowJson.get('location').get('x')
         locationY = rowJson.get('location') and rowJson.get('location').get('y')        
         absoluteFilename = rowJson.get('absoluteFilename')
-        sha256 = rowJson.get('sha256')
         isVideo = rowJson.get('isVideo')
         return (id is not None and type(id) == str
             and user is not None and type(user) == str
@@ -69,6 +65,5 @@ class MediaMetadata(db.Model):
             and (type(locationX) == float if locationX is not None else True)
             and (type(locationY) == float if locationY is not None else True)
             and absoluteFilename is not None and type(absoluteFilename) == str
-            and sha256 is not None and type(sha256) == str and len(sha256) == SHA256_LEN
             and isVideo is not None and type(isVideo) == bool
         )
