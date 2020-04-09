@@ -9,10 +9,11 @@
 import UIKit
 import Photos
 
-// TODO: overhaul image upload so we use phassetresourcemanager instead of phimagemanager. why? better for backups... can get jpegs that are decent and can make sure we don't miss videos that go with live photos
-// TODO: support live photos by uploading photo part AND. need to check asset.mediaSubtypes to see if .photoLive. If so, retrieve a PHLivePhoto object using the PHImageManager class and assign it to a PHLivePhotoView object.
+// TODO: overhaul image upload so we use phassetresourcemanager instead of phimagemanager. why? better for backups... can get jpegs that are decent and can make sure we don't miss videos that go with live photos. EDIT: just tested... this approach is WAY WAY FASTER holy shit. tradeoff is i can't use thumbnails...
+// TODO: test video uploads with slow motion (high framerate)
+// TODO: support live photos by uploading photo part AND video part. need to check asset.mediaSubtypes to see if .photoLive
 // TODO: consider getting rid of manual entry album name, replacing it with just the month and year
-// TODO: need https
+// TODO: (much later) need https
 class ViewController: UIViewController {
 
     @IBOutlet weak var previewImage: UIImageView!
@@ -27,6 +28,7 @@ class ViewController: UIViewController {
     var duplicates: Int = 0
     var timestamps: [UInt64: Bool] = [:]
     var timestampMutex = DispatchSemaphore(value: 0)
+    var multipartUploadMutex = DispatchSemaphore(value: 0)
     var chunkMutex = DispatchSemaphore(value: 0)
     var uploadCallsGroup = DispatchGroup()
     var user: String = "vicky"
@@ -214,39 +216,58 @@ class ViewController: UIViewController {
 //    }
     
     func handleVideoAsset(album: String, asset: PHAsset, assetNum: Int, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool) {
+        var failed = false
+        if shouldUpload(timestamp: timestamp) {
+            let assetResources = PHAssetResource.assetResources(for: asset)
 
-        let manager = PHAssetResourceManager.default()
-        let assetResources = PHAssetResource.assetResources(for: asset)
-        if assetResources.count > 1 {
-            print("--> asset subtype", asset.mediaSubtypes, PHAssetMediaSubtype(rawValue: 0).)
-            print("--> resources are", assetResources)
+            var videoAssetResource: PHAssetResource?
+            var fullSizeVideoAssetResource: PHAssetResource?
+            for assetResource in assetResources {
+                switch assetResource.type {
+                case .video:
+                    videoAssetResource = assetResource
+                case .fullSizeVideo:
+                    fullSizeVideoAssetResource = assetResource
+                default:
+                    continue
+                }
+            }
+            guard let finalVideoAssetResource = fullSizeVideoAssetResource != nil ? fullSizeVideoAssetResource: videoAssetResource else {
+                print ("Couldn't find video or fullVideo asset resource:", assetResources)
+                exit(1)
+            }
+
+            // TODO: get thumbnail?
+
+            DispatchQueue.main.async {
+                self.statusMessage.text = ViewController.UPLOADING_MEDIA_MSG("video", assetNum, self.results!.count)
+            }
+            let managerRequestOptions = PHAssetResourceRequestOptions()
+            managerRequestOptions.isNetworkAccessAllowed = true
+            let manager = PHAssetResourceManager.default()
+            var newUuid: String?
+            manager.requestData(for: finalVideoAssetResource, options: managerRequestOptions, dataReceivedHandler: { (dataChunk: Data) in
+                newUuid = self.sendSingleChunkOverWire(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .video, chunkBase64: dataChunk.base64EncodedString(), uuid: newUuid)
+                if newUuid == nil {
+                    failed = true
+                }
+            }) { (err: Error? ) in
+                if err != nil {
+                    print ("Got an error in completion handler for multipart video upload:", err!)
+                    failed = true
+                }
+                self.multipartUploadMutex.signal()
+            }
+            _ = self.multipartUploadMutex.wait(timeout: .distantFuture)
+        } else {
+            self.duplicates += 1
+            DispatchQueue.main.async {
+                self.statusMessage.text = ViewController.DUPLICATE_MSG("video", assetNum, self.results!.count)
+            }
         }
-
-//        manager.requestData(for: <#T##PHAssetResource#>, options: <#T##PHAssetResourceRequestOptions?#>, dataReceivedHandler: <#T##(Data) -> Void#>, completionHandler: <#T##(Error?) -> Void#>)
-        
-//        requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
-//            guard let img = img else {
-//                print ("Image was nil")
-//                return
-//            }
-//
-//            DispatchQueue.main.async { self.previewImage.image = img }
-//            if self.shouldUpload(timestamp: timestamp) {
-//                DispatchQueue.main.async {
-//                    self.statusMessage.text = ViewController.UPLOADING_MEDIA_MSG("image", assetNum, self.results!.count)
-//                }
-//                let imgB64 = img.pngData()!.base64EncodedString()
-//                if self.sendSingleChunkOverWire(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .image, chunkBase64: imgB64) == nil {
-//                    self.failedUploadCount += 1
-//                }
-//            } else {
-//                self.duplicates += 1
-//                DispatchQueue.main.async {
-//                    self.statusMessage.text = ViewController.DUPLICATE_MSG("Image", assetNum, self.results!.count)
-//                }
-//            }
-//        }
-
+        if failed {
+            self.failedUploadCount += 1
+        }
         self.uploadCallsGroup.leave()
     }
 
