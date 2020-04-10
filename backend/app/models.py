@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 
 SHA256_LEN = 64
+UUID_LEN = 36
 
 class MediaMetadata(db.Model):
     '''Define table of image metadata rows'''
@@ -58,12 +59,12 @@ class MediaMetadata(db.Model):
         locationY = rowJson.get('location') and rowJson.get('location').get('y')        
         absoluteFilename = rowJson.get('absoluteFilename')
         isVideo = rowJson.get('isVideo')
-        return (id is not None and type(id) == str
-            and user is not None and type(user) == str
-            and timestamp is not None and type(timestamp) == int
-            and isFavorite is not None and type(isFavorite) == bool
-            and (type(locationX) == float if locationX is not None else True)
-            and (type(locationY) == float if locationY is not None else True)
-            and absoluteFilename is not None and type(absoluteFilename) == str
-            and isVideo is not None and type(isVideo) == bool
+        return (type(id) is str and len(id) == 36
+            and type(user) is str and len(user) > 0
+            and type(timestamp) is int
+            and type(isFavorite) is bool
+            and (type(locationX) is float if locationX is not None else True)
+            and (type(locationY) is float if locationY is not None else True)
+            and type(absoluteFilename) is str and len(absoluteFilename) > 0
+            and type(isVideo) is bool
         )
