@@ -22,6 +22,120 @@ FAVORITES_DIR_NAME = 'favorites'
 DEFAULT_ALBUM = 'default'
 UUID_LEN = 36
 
+def makeError(statusCode, msg=''):
+    ret = jsonify({
+        'status': statusCode,
+        'message': msg
+    })
+    ret.status_code = statusCode
+    return ret
+
+@app.route('/health')
+def health():
+    if request.args.get('p') != PW:
+        return makeError(500, 'pwnd')
+    return jsonify('ok')
+
+def argsTimestamps(params):
+    if params.get('p') != PW:
+        raise Exception('pwnd')
+
+    user = params.get('u')
+    if type(user) is not str or len(user) == 0:
+        errMsg = 'user needs to be a nonempty string!'
+        raise Exception(errMsg)
+
+    return user
+
+def mapTimesSeenToBool(timesSeenIsLivePhoto):
+    '''There are 3 outcomes: upload, not upload, crash. they corresond to None, True, False.
+
+    If timesSeen is None, frontend should upload. If it's 1, frontend should NOT upload, NOT crash.
+    If it's 2 but they're for the photo and video parts of a live photo, frontend should also
+    neither upload nor crash. If it's 2 but not for live photo, it should crash. If 3 or greater,
+    it should crash. Crashing is so I'm forced to investigate what happened on the backend :-)
+    '''
+    if timesSeenIsLivePhoto is None:
+        return None
+
+    timesSeen, isLivePhoto = timesSeenIsLivePhoto
+    if timesSeen == 1 and isLivePhoto:  # doesn't make sense; there should be a paired photo or vid
+        return False  # false means force a crash on the frontend
+    elif timesSeen == 1:  # if saw photo or video once and it's not live, makes sense, just skip
+        return True  # true means make frontend skip an upload
+    elif timesSeen == 2 and isLivePhoto:  # makes sense, just skip
+        return True
+    else:  # if saw twice and is not live or saw 3 or more times, doesn't make sense. crash
+        return False
+
+@app.route('/timestamps', methods=['GET'])
+def getTimestamps():
+    '''Return dict with timestamps mapped to true if exactly 1 row has it, false if > 1 row'''
+    try:
+        user = argsTimestamps(request.args)
+    except Exception as err:
+        makeError(500, str(err))
+
+    # record the number of times each timestamp occurs in the database
+    timesSeen = {}
+    for row in models.MediaMetadata.query.all():
+        if user != row.user:
+            continue
+        timestamp = row.creationTimestamp
+        isLivePhoto = row.isLivePhoto
+        if timesSeen.get(timestamp) is None:
+            timesSeen[timestamp] = [0, isLivePhoto]
+        timesSeen[timestamp][0] += 1
+        timesSeen[timestamp][1] = timesSeen[timestamp][1] and isLivePhoto
+
+    ret = {k: mapTimesSeenToBool(v) for k, v in timesSeen.items()}
+    return jsonify(ret)
+
+def getChunkFilename(tmpUuid, chunkNum):
+    return FILE_PART_NAME.format(dir=FILE_PARTS_DIR, tmpUuid=tmpUuid, chunkNum=chunkNum)
+
+def argsPart(body):
+    if body.get('p') != PW:
+        raise Exception('pwnd')
+
+    chunkNum = body.get('o')
+    if type(chunkNum) is not int or chunkNum < 0:
+        errMsg = 'Need nonnegative chunk number for file part upload, got {}'.format(chunkNum)
+        raise Exception(errMsg)
+
+    tmpUuid = body.get('d')
+    if type(tmpUuid) is not str or len(tmpUuid) != UUID_LEN:
+        errMsg = 'Need temporary uuid'
+        raise Exception(errMsg)
+
+    partFilename = getChunkFilename(tmpUuid, chunkNum)
+    return chunkNum, partFilename
+
+@app.route('/part', methods=['POST'])
+def uploadPart():
+    '''Receive part of image or video'''
+    body = request.get_json(silent=True)
+
+    # process and validate json body
+    try:
+        chunkNum, partFilename = argsPart(body)
+    except Exception as err:
+        print (err)
+        return makeError(500, str(err))
+
+    try:
+        # make tmp directory if it doesn't exist yet
+        if not pathlib.Path(FILE_PARTS_DIR).is_dir():
+            os.mkdir(FILE_PARTS_DIR)
+
+        # write part to tmp directory
+        with open(partFilename, 'wb') as fh:
+            fh.write(base64.b64decode(body.get('i')))
+    except Exception as err:
+        print (err)
+        return makeError(500, str(err))
+    return jsonify('')
+
 def getFilenames(rowDict, album):
     relativeFilename = FILENAME_FORMAT.format(
         timestamp=rowDict.get('creationTimestamp'),
@@ -50,88 +164,9 @@ def getFilenames(rowDict, album):
     )
     return absPath, absFavePath, directory, faveDirectory
 
-def getChunkFilename(tmpUuid, chunkNum):
-    return FILE_PART_NAME.format(dir=FILE_PARTS_DIR, tmpUuid=tmpUuid, chunkNum=chunkNum)
-
-def makeError(statusCode, msg=''):
-    ret = jsonify({
-        'status': statusCode,
-        'message': msg
-    })
-    ret.status_code = statusCode
-    return ret
-
-@app.route('/health')
-def health():
-    password = request.args.get('p')
-    if password != PW:
-        return makeError(500, 'pwnd')
-    return jsonify('ok')
-
-@app.route('/timestamps', methods=['GET'])
-def getTimestamps():
-    '''Return dict with timestamps mapped to true if exactly 1 row has it, false if > 1 row'''
-    password = request.args.get('p')
-    if password != PW:
-        return makeError(500, 'pwnd')
-
-    user = request.args.get('u')
-    ret = {}
-    for row in models.MediaMetadata.query.all():
-        if user != row.user:
-            continue
-        timestamp = row.creationTimestamp
-        if ret.get(timestamp) is None:
-            ret[timestamp] = True
-        else:
-            ret[timestamp] = False
-    return jsonify(ret)
-
-def argsPart(body):
-    if body.get('p') != PW:
-        raise Exception('pwnded')
-
-    chunkNum = body.get('o')
-    if type(chunkNum) is not int or chunkNum < 0:
-        errMsg = 'Need nonnegative chunk number for file part upload, got {}'.format(chunkNum)
-        raise Exception(errMsg)
-
-    tmpUuid = body.get('d')
-    if type(tmpUuid) is not str or len(tmpUuid) != UUID_LEN:
-        errMsg = 'Need temporary uuid'
-        raise Exception(errMsg)
-
-    partFilename = FILE_PART_NAME.format(dir=FILE_PARTS_DIR, tmpUuid=tmpUuid, chunkNum=chunkNum)
-    return chunkNum, partFilename
-
-@app.route('/part', methods=['POST'])
-def uploadPart():
-    '''Receive part of image or video'''
-    body = request.get_json(silent=True)
-
-    # process and validate json body
-    try:
-        chunkNum, partFilename = argsPart(body)
-    except Exception as err:
-        print (err)
-        return makeError(500, str(err))
-
-    try:
-        # make tmp directory if it doesn't exist yet
-        if not pathlib.Path(FILE_PARTS_DIR).is_dir():
-            os.mkdir(FILE_PARTS_DIR)
-
-        # write part to tmp directory
-        with open(partFilename, 'wb') as fh:
-            fh.write(base64.b64decode(body.get('i')))
-    except Exception as err:
-        print (err)
-        return makeError(500, str(err))
-    return jsonify('')
-
 def argsSave(body):
     if body.get('p') != PW:
-        raise Exception('pwnded')
+        raise Exception('pwnd')
 
     numParts = body.get('n')
     if type(numParts) is not int or numParts <= 0:
@@ -156,7 +191,8 @@ def argsSave(body):
         'locationLatitude': body.get('lat'),
         'locationLongitude': body.get('long'),
         'isFavorite': body.get('f'),
-        'isVideo': body.get('v')
+        'isVideo': body.get('v'),
+        'isLivePhoto': body.get('l')
     }
     absPath, absFavePath, directory, faveDirectory = getFilenames(rowDict, album)
     rowDict['absoluteFilename'] = absPath

@@ -16,6 +16,7 @@ class MediaMetadata(db.Model):
     isFavorite = db.Column(db.Boolean)  # based on selection in iOS photos app
     absoluteFilename = db.Column(db.String(256))
     isVideo = db.Column(db.Boolean)
+    isLivePhoto = db.Column(db.Boolean)
 
     def __repr__(self):
         return str(self.toDict())
@@ -31,7 +32,8 @@ class MediaMetadata(db.Model):
             },
             'isFavorite': self.isFavorite,
             'absoluteFilename': self.absoluteFilename,
-            'isVideo': self.isVideo
+            'isVideo': self.isVideo,
+            'isLivePhoto': self.isLivePhoto
         }
 
     @classmethod
@@ -44,7 +46,8 @@ class MediaMetadata(db.Model):
             locationLongitude=rowDict.get('locationLongitude'),
             isFavorite=rowDict.get('isFavorite'),
             absoluteFilename=rowDict.get('absoluteFilename'),
-            isVideo=rowDict.get('isVideo')
+            isVideo=rowDict.get('isVideo'),
+            isLivePhoto=rowDict.get('isLivePhoto')
         )
 
     @classmethod
@@ -59,6 +62,7 @@ class MediaMetadata(db.Model):
         locationY = rowJson.get('location') and rowJson.get('location').get('y')        
         absoluteFilename = rowJson.get('absoluteFilename')
         isVideo = rowJson.get('isVideo')
+        isLivePhoto = rowJson.get('isLivePhoto')
         return (type(id) is str and len(id) == 36
             and type(user) is str and len(user) > 0
             and type(timestamp) is int
@@ -67,4 +71,5 @@ class MediaMetadata(db.Model):
             and (type(locationY) is float if locationY is not None else True)
             and type(absoluteFilename) is str and len(absoluteFilename) > 0
             and type(isVideo) is bool
+            and type(isLivePhoto) is bool
         )

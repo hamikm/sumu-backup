@@ -9,11 +9,6 @@
 import UIKit
 import Photos
 
-// TODO: overhaul image upload so we use phassetresourcemanager instead of phimagemanager. why? better for backups... can get jpegs that are decent and can make sure we don't miss videos that go with live photos. EDIT: just tested... this approach is WAY WAY FASTER holy shit. tradeoff is i can't use thumbnails...
-// TODO: test video uploads with slow motion (high framerate)
-// TODO: support live photos by uploading photo part AND video part. need to check asset.mediaSubtypes to see if .photoLive
-// TODO: consider getting rid of manual entry album name, replacing it with just the month and year
-// TODO: (much later) need https
 class ViewController: UIViewController {
 
     // Outlets for UI elements
@@ -56,7 +51,6 @@ class ViewController: UIViewController {
     static let CHECKING_SERVER_MSG = { (server: String) in "Checking if \(server) is online..." }
     static let SERVER_OFFLINE_MSG = { (server: String) in "\(server) is offline." }
     static let WELCOME_MSG = { (server: String) in "Upload iPhone media to \(server)!" }
-    static let STARTING_UPLOAD = "Starting upload..."
     static let UPLOADING_MEDIA_MSG = { (type: String, number: Int, total: Int) in "Uploading \(type) \(String(number)) of \(String(total))..." }
     static let UPLOADS_FINISHED_MSG = { (type: String) in "Uploads finished. Check Plex for your \(type); if they're there, you can delete them from your phone." }
     static let SOME_UPLOADS_FAILED_MSG = { (type: String, number: Int, total: Int) in "\(String(number)) of \(String(total)) uploads failed. Careful when you delete \(type) from your phone!" }
@@ -64,9 +58,7 @@ class ViewController: UIViewController {
     static let DUPLICATE_MSG =  { (type: String, number: Int, total: Int) in "\(type) \(String(number)) of \(String(total)) is already on the server!" }
 
     // Constants
-    static let ENV = "prod"  // TODO set to "dev" to call API at http://localhost:9090
-    static let LOCALHOST = "0.0.0.0"
-    static let SERVER = "galadriel"
+    static let SERVER = "vingilot"
     static let HEALTH_URL = "http://{host}:9090/health"
     static let TIMESTAMPS_URL = "http://{host}:9090/timestamps"
     static let PART_URL = "http://{host}:9090/part"
@@ -91,58 +83,49 @@ class ViewController: UIViewController {
 // Video and image code
 extension ViewController {
 
-    // Find the desired image asset resource; there are many types, like .photo and .fullSizePhoto
-    func getFinalImageAssetResource(asset: PHAsset) -> PHAssetResource {
-        let assetResources = PHAssetResource.assetResources(for: asset)
-        var chosenAssetResource: PHAssetResource?
-        for assetResource in assetResources {
-            if assetResource.type == .fullSizePhoto {
-                chosenAssetResource = assetResource
-            }
-            if assetResource.type == .photo && chosenAssetResource == nil {
-                chosenAssetResource = assetResource
-            }
-        }
-        guard let finalImageAssetResource = chosenAssetResource else {
-            print ("Couldn't find video or fullVideo asset resource:", assetResources)
-            exit(1)
-        }
-        return finalImageAssetResource
-    }
+    // Find the desired asset resource; there are many resource types, like .photo, .fullSizePhoto, .video, .fullSizeVideo, .pairedVideo, .fullSizePairedVideo
+    func getFinalAssetResource(asset: PHAsset, mediaType: PHAssetMediaType, isLivePhoto: Bool) -> PHAssetResource {
 
-    // Find the desired video asset resource; there are many types, like .video and .fullSizeVideo
-    func getFinalVideoAssetResource(asset: PHAsset) -> PHAssetResource {
+        // Determine preferred and backup resource types
+        var preferredResourceType = mediaType == .video ? PHAssetResourceType.fullSizeVideo : PHAssetResourceType.fullSizePhoto
+        var backupResourceType = mediaType == .video ? PHAssetResourceType.video : PHAssetResourceType.photo
+        if isLivePhoto && mediaType == .video {  // if this request is for the video part of a live photo
+            preferredResourceType = .fullSizePairedVideo
+            backupResourceType = .pairedVideo
+        }
+
+        // Find the desired asset resource
         let assetResources = PHAssetResource.assetResources(for: asset)
         var chosenAssetResource: PHAssetResource?
         for assetResource in assetResources {
-            if assetResource.type == .fullSizeVideo {
+            if assetResource.type == preferredResourceType {
                 chosenAssetResource = assetResource
             }
-            if assetResource.type == .video && chosenAssetResource == nil {
+            if assetResource.type == backupResourceType && chosenAssetResource == nil {
                 chosenAssetResource = assetResource
             }
         }
-        guard let finalVideoAssetResource = chosenAssetResource else {
-            print ("Couldn't find video or fullVideo asset resource:", assetResources)
+        guard let finalAssetResource = chosenAssetResource else {
+            print ("Couldn't find preferred or backup asset resource. Found", assetResources)
+            print ("Asked for", preferredResourceType, backupResourceType)
             exit(1)
         }
-        return finalVideoAssetResource
+        return finalAssetResource
     }
 
     // Upload asset in chunks, blocking until the upload is complete or errors out
-    func handleAsset(album: String, asset: PHAsset, assetNum: Int, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType) {
+    func handleAsset(album: String, asset: PHAsset, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, isLivePhoto: Bool) {
 
         // Set up to retrieve asset resource
-        DispatchQueue.main.async { self.statusMessage.text = self.getUploadingMsg(mediaType: mediaType, assetNum: assetNum) }
         let multipartUploadUuid = UUID().uuidString
         var num: Int = 0
         var failed = false
-        let finalAssetResource = mediaType == .video ? getFinalVideoAssetResource(asset: asset) : getFinalImageAssetResource(asset: asset)
+        let finalAssetResource = getFinalAssetResource(asset: asset, mediaType: mediaType, isLivePhoto: isLivePhoto)
+
+        // Get the asset resource chunks, upload them asyncronously, then do a final "concat" API call to stick the chunks together on the backend
         let managerRequestOptions = PHAssetResourceRequestOptions()
         managerRequestOptions.isNetworkAccessAllowed = true
         let manager = PHAssetResourceManager.default()
-
-        // Get the asset resource chunks, upload them asyncronously, then do a final "concat" API call to stick the chunks together on the backend
         manager.requestData(for: finalAssetResource, options: managerRequestOptions, dataReceivedHandler: { (dataChunk: Data) in
             num += 1
             self.sendChunkOverWireAsync(chunkBase64: dataChunk.base64EncodedString(), uuid: multipartUploadUuid, chunkNum: num)
@@ -154,7 +137,7 @@ extension ViewController {
                     print ("Got an error in completion handler for multipart upload:", err!)
                     failed = true
                 } else {
-                    if !self.finalizeMultipartUpload(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, uuid: multipartUploadUuid, numParts: num) {
+                    if !self.finalizeMultipartUpload(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, uuid: multipartUploadUuid, numParts: num, isLivePhoto: isLivePhoto) {
                         print ("Error when completing multipart upload!")
                         failed = true
                     }
@@ -230,7 +213,7 @@ extension ViewController {
         }).resume()
     }
 
-    func finalizeMultipartUpload(album: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, uuid: String, numParts: Int) -> Bool {
+    func finalizeMultipartUpload(album: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, uuid: String, numParts: Int, isLivePhoto: Bool) -> Bool {
         let sesh = URLSession(configuration: .default)
         var req = URLRequest(url: getUrl(endpoint: "save"))
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -245,7 +228,8 @@ extension ViewController {
             "f": isFavorite,
             "v": (mediaType == .image ? false : true),
             "d": uuid,
-            "n": numParts
+            "n": numParts,
+            "l": isLivePhoto
         ]
 
         var failed = false
@@ -280,7 +264,7 @@ extension ViewController {
         default:
             urlTemplate = nil
         }
-        let urlString = (urlTemplate!.replacingOccurrences(of: "{host}", with: (ViewController.ENV == "dev" ? ViewController.LOCALHOST : ViewController.SERVER)) + params)
+        let urlString = urlTemplate!.replacingOccurrences(of: "{host}", with: ViewController.SERVER) + params
         return URL(string: urlString)!
     }
 }
@@ -300,8 +284,10 @@ extension ViewController {
         return ViewController.UPLOADS_FINISHED_MSG(mediaType == .image ? "images" : "videos") + self.getDuplicatesMsg(mediaType: mediaType)
     }
 
-    func getUploadingMsg(mediaType: PHAssetMediaType, assetNum: Int) -> String {
-        return ViewController.UPLOADING_MEDIA_MSG(mediaType == .image ? "image" : "video", assetNum, self.results!.count)
+    func getUploadingMsg(mediaType: PHAssetMediaType, assetNum: Int, isLivePhoto: Bool) -> String {
+        var mediaTypeString = mediaType == .image ? "image" : "video"
+        mediaTypeString = isLivePhoto ? "live photo" : mediaTypeString
+        return ViewController.UPLOADING_MEDIA_MSG(mediaTypeString, assetNum, self.results!.count)
     }
 }
 
@@ -341,11 +327,11 @@ extension ViewController {
         results = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
     }
 
+    // This method either recommends uploading, recommends not uploading, or crashes. These corresond to no timestamp seen, timestamp is mapped to true, and timestamp is mapped to false. On the backend, if timesSeen is None, then we should recommend uploading. If it's 1, we should recommend not uploading. If it's 1 but for a live photo, that doesn't make sense — we should crash, since timesSeen should be 2. If it's 2 but they're for the photo and video parts of a live photo, we should recommend not uploading. If it's 2 but not for live photo, we should crash. If 3 or greater, we should crash.
     func shouldUpload(timestamp: UInt64) -> Bool {
         guard let occursExactlyOnce = self.timestamps[timestamp] else {
             return true
         }
-
         if !occursExactlyOnce {
             print("There was a photo timestamp collision!")
             exit(1)
@@ -358,7 +344,6 @@ extension ViewController {
 
         failedUploadCount = 0
         duplicates = 0
-        DispatchQueue.main.async { self.statusMessage.text = ViewController.STARTING_UPLOAD }
 
         for i in 0..<results.count {
             autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
@@ -367,10 +352,16 @@ extension ViewController {
                 let latitude = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
                 let longitude = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
                 let isFavorite = asset.isFavorite
+                let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
 
                 // Just abort this upload attempt if the media is already on the backend
                 if shouldUpload(timestamp: timestamp) {
-                    handleAsset(album: album, asset: asset, assetNum: i + 1, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType)
+                    DispatchQueue.main.async { self.statusMessage.text = self.getUploadingMsg(mediaType: mediaType, assetNum: i + 1, isLivePhoto: isLivePhoto) }
+
+                    handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, isLivePhoto: isLivePhoto)
+                    if isLivePhoto {
+                        handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .video, isLivePhoto: isLivePhoto)
+                    }
                 } else {
                     duplicates += 1
                     DispatchQueue.main.async {
