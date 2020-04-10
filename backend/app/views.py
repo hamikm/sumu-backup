@@ -7,7 +7,7 @@ import os
 import shutil
 
 PW = 'beeblesissuchameerkat'
-ENV = 'dev'
+ENV = os.environ.get('SUMU_BACKUP_ENV') or 'prod'
 ROOT_DIR_DEV = '.'
 ROOT_DIR_PROD = '/opt/plexmedia'
 IMG_EXTENSION = 'png'
@@ -143,7 +143,7 @@ def getFilenames(rowDict, album):
         extension=(IMG_EXTENSION if not rowDict.get('isVideo') else VIDEO_EXTENSION)
     )
     userDirectory = USER_DIRECTORY.format(
-        root=ROOT_DIR_DEV if ENV == 'dev' else ROOT_DIR_PROD,
+        root=ROOT_DIR_PROD if ENV == 'prod' else ROOT_DIR_DEV,
         user=rowDict.get('user')
     )
     directory = DIRECTORY_TO_WRITE_FILES.format(
