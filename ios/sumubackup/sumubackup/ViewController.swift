@@ -377,11 +377,13 @@ extension ViewController {
         return false
     }
 
-    func startUploads(album: String, mediaType: PHAssetMediaType) {
+    func startUploads(mediaType: PHAssetMediaType) {
         guard let results = results else { return }
 
         failedUploadCount = 0
         duplicates = 0
+        let origAlbumName = getAlbumString()
+        var album = origAlbumName
 
         for i in 0..<results.count {
             autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
@@ -391,6 +393,14 @@ extension ViewController {
                 let longitude = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
                 let isFavorite = asset.isFavorite
                 let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
+
+                // Choose a date-based album name if none was entered
+                if origAlbumName == ViewController.DEFAULT_ALBUM_NAME {
+                    let creationDate = asset.creationDate ?? Date()
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM"
+                    album = formatter.string(from: creationDate)
+                }
 
                 // Just abort this upload attempt if the media is already on the backend
                 if shouldUpload(timestamp: timestamp) {
@@ -414,12 +424,11 @@ extension ViewController {
     func uploadMedia(mediaType: PHAssetMediaType) {
         getMedia(mediaType: mediaType)
         let itemCount = results!.count
-        let album = getAlbumString()
         setUploadButtons(enable: false)
 
         DispatchQueue.global(qos: .background).async {
             self.getTimestamps()
-            self.startUploads(album: album, mediaType: mediaType)
+            self.startUploads(mediaType: mediaType)
 
             // Show final status message after all uploads complete
             DispatchQueue.main.async {
