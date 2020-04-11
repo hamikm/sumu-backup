@@ -3,7 +3,7 @@ then
     exit
 else
     cd /home/hamik/sumu-backup/backend
-    . env/bin/activate
+    . sumu_env/bin/activate
     python3 serve.py
 fi
 exit
