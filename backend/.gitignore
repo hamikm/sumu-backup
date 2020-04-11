@@ -2,6 +2,8 @@ hamik*
 vicky*
 *.db
 env
-__pycache__
+sumu_env
+__pycache__/
 *\~
 \#*
+tmp

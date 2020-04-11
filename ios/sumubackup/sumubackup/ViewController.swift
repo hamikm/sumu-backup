@@ -19,30 +19,46 @@ class ViewController: UIViewController {
 
     // Instance variables
     var results: PHFetchResult<PHAsset>?
+    var uploadAtIndexComplete: [Bool]?
     var failedUploadCount: Int = 0
     var duplicates: Int = 0
     var timestamps: [UInt64: Bool] = [:]
     var user: String = "vicky"
+    var uploading = false
+    var forceStopUploads = false
 
     // Locks for async handler wrangling
     var getTimestampsMutex = DispatchSemaphore(value: 0)
     var sendChunkOverWireAsyncGroup = DispatchGroup()
     var finalizeMultipartUploadMutex = DispatchSemaphore(value: 0)
     var handleAssetMutex = DispatchSemaphore(value: 0)
+    var livenessCheckMutex = DispatchSemaphore(value: 0)
     var startUploadsGroup = DispatchGroup()
 
     // Keep checking if the server is online every few seconds
     var isServerOnline = false {
         didSet {
             if isServerOnline {
-                uploadPhotosButton.isEnabled = true
-                uploadVideosButton.isEnabled = true
-                statusMessage.text = ViewController.WELCOME_MSG(ViewController.SERVER)
-            } else {
-                statusMessage.text = ViewController.SERVER_OFFLINE_MSG(ViewController.SERVER)
-                DispatchQueue.main.asyncAfter(deadline: .now() + ViewController.RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS) {
-                    self.checkIsServerOnline()
+                if uploading {  // if we were uploading when we lost the connection, then signal to the uploading code to continue
+                    livenessCheckMutex.signal()
+                    forceStopUploads = false
+                } else {  // if we're before or between uploads, just enable the upload buttons and show a welcome message
+                    setUploadButtons(enable: true)
+                    statusMessage.text = ViewController.WELCOME_MSG(ViewController.SERVER)
                 }
+            } else {  // if server is unreachable
+                if uploading {  // and if we were in the middle of an upload
+                    forceStopUploads = true
+                    statusMessage.text = ViewController.UPLOAD_INTERRUPTED_MSG(ViewController.SERVER)
+                } else {  //  but if we just opened the app or are between uploads
+                    setUploadButtons(enable: false)
+                    statusMessage.text = ViewController.SERVER_OFFLINE_MSG(ViewController.SERVER)
+                }
+            }
+
+            // Keep performing a liveness check in case the connection goes down
+            DispatchQueue.main.asyncAfter(deadline: .now() + ViewController.RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS) {
+                self.checkIsServerOnline()
             }
         }
     }
@@ -56,6 +72,7 @@ class ViewController: UIViewController {
     static let SOME_UPLOADS_FAILED_MSG = { (type: String, number: Int, total: Int) in "\(String(number)) of \(String(total)) uploads failed. Careful when you delete \(type) from your phone!" }
     static let FINAL_DUPLICATES_MSG = { (type: String, server: String, duplicates: Int) in "Did not upload \(String(duplicates)) \(type) because they were already on \(server)." }
     static let DUPLICATE_MSG =  { (type: String, number: Int, total: Int) in "\(type) \(String(number)) of \(String(total)) is already on the server!" }
+    static let UPLOAD_INTERRUPTED_MSG = { (server: String) in "Lost connection to \(server) while uploading. Retrying..." }
 
     // Constants
     static let SERVER = "vingilot"
@@ -85,7 +102,7 @@ class ViewController: UIViewController {
 extension ViewController {
 
     // Find the desired asset resource; there are many resource types, like .photo, .fullSizePhoto, .video, .fullSizeVideo, .pairedVideo, .fullSizePairedVideo
-    func getFinalAssetResource(asset: PHAsset, mediaType: PHAssetMediaType, isLivePhoto: Bool) -> PHAssetResource {
+    func getFinalAssetResource(asset: PHAsset, mediaType: PHAssetMediaType, isLivePhoto: Bool) -> PHAssetResource? {
 
         // Determine preferred and backup resource types
         var preferredResourceType = mediaType == .video ? PHAssetResourceType.fullSizeVideo : PHAssetResourceType.fullSizePhoto
@@ -106,22 +123,23 @@ extension ViewController {
                 chosenAssetResource = assetResource
             }
         }
-        guard let finalAssetResource = chosenAssetResource else {
+        if chosenAssetResource == nil {
             print ("Couldn't find preferred or backup asset resource. Found", assetResources)
             print ("Asked for", preferredResourceType, backupResourceType)
-            exit(1)
         }
-        return finalAssetResource
+        return chosenAssetResource
     }
 
     // Upload asset in chunks, blocking until the upload is complete or errors out
-    func handleAsset(album: String, asset: PHAsset, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, isLivePhoto: Bool) {
+    func handleAsset(album: String, asset: PHAsset, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, isLivePhoto: Bool, assetIndex: Int) {
 
         // Set up to retrieve asset resource
         let multipartUploadUuid = UUID().uuidString
         var num: Int = 0
         var failed = false
-        let finalAssetResource = getFinalAssetResource(asset: asset, mediaType: mediaType, isLivePhoto: isLivePhoto)
+        guard let finalAssetResource = getFinalAssetResource(asset: asset, mediaType: mediaType, isLivePhoto: isLivePhoto) else {
+            return
+        }
         let filename = finalAssetResource.originalFilename
         let splitFilename = filename.split(separator: ".")
         let fileExtension = String(splitFilename[splitFilename.count - 1]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -183,9 +201,10 @@ extension ViewController {
         }
 
         _ = handleAssetMutex.wait(timeout: .distantFuture)
-
         if failed {
             failedUploadCount += 1
+        } else {  // upload was successful
+            uploadAtIndexComplete![assetIndex] = true
         }
     }
 }
@@ -333,10 +352,12 @@ extension ViewController {
 extension ViewController {
 
     @IBAction func uploadPhotosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        uploading = true
         uploadMedia(mediaType: .image)
     }
 
     @IBAction func uploadVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        uploading = true
         uploadMedia(mediaType: .video)
     }
 
@@ -363,6 +384,7 @@ extension ViewController {
         fetchOptions.includeAllBurstAssets = false
         fetchOptions.includeAssetSourceTypes = [.typeCloudShared, .typeUserLibrary, .typeiTunesSynced]
         results = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
+        uploadAtIndexComplete = Array(repeating: false, count: results!.count)
     }
 
     // This method either recommends uploading, recommends not uploading, or crashes. These corresond to no timestamp seen, timestamp is mapped to true, and timestamp is mapped to false. On the backend, if timesSeen is None, then we should recommend uploading. If it's 1, we should recommend not uploading. If it's 1 but for a live photo, that doesn't make sense — we should crash, since timesSeen should be 2. If it's 2 but they're for the photo and video parts of a live photo, we should recommend not uploading. If it's 2 but not for live photo, we should crash. If 3 or greater, we should crash.
@@ -377,16 +399,36 @@ extension ViewController {
         return false
     }
 
-    func startUploads(mediaType: PHAssetMediaType) {
+    // uploadAtIndexComplete is a bitmap for successful asset uploads. This method returns the index of the first asset that failed to upload
+    func supremumOfContiguousSuccessfulUploadIndices() -> Int {
+        guard let uploadAtIndexComplete = uploadAtIndexComplete else {
+            print ("uploadAtIndexComplete is nil")
+            return Int.max
+        }
+        for i in 0..<uploadAtIndexComplete.count {
+            if !(uploadAtIndexComplete[i]) {
+                return i
+            }
+        }
+        return uploadAtIndexComplete.count
+    }
+
+    func startUploads(origAlbumName: String, mediaType: PHAssetMediaType) {
         guard let results = results else { return }
 
         failedUploadCount = 0
         duplicates = 0
-        let origAlbumName = getAlbumString()
         var album = origAlbumName
+        var i = 0
+        while i < results.count {
 
-        for i in 0..<results.count {
             autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
+                if forceStopUploads {
+                    _ = livenessCheckMutex.wait(timeout: .distantFuture)
+                    i = supremumOfContiguousSuccessfulUploadIndices()
+                    return  // from this autoreleasepool closure
+                }
+
                 let asset = results.object(at: i)
                 let timestamp = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
                 let latitude = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
@@ -406,9 +448,9 @@ extension ViewController {
                 if shouldUpload(timestamp: timestamp) {
                     DispatchQueue.main.async { self.statusMessage.text = self.getUploadingMsg(mediaType: mediaType, assetNum: i + 1, isLivePhoto: isLivePhoto) }
 
-                    handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, isLivePhoto: isLivePhoto)
+                    handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, isLivePhoto: isLivePhoto, assetIndex: i)
                     if isLivePhoto {
-                        handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .video, isLivePhoto: isLivePhoto)
+                        handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .video, isLivePhoto: isLivePhoto, assetIndex: i)
                     }
                 } else {
                     duplicates += 1
@@ -416,6 +458,7 @@ extension ViewController {
                         self.statusMessage.text = ViewController.DUPLICATE_MSG("video", i + 1, self.results!.count)
                     }
                 }
+                i += 1
             }
         }
     }
@@ -425,13 +468,15 @@ extension ViewController {
         getMedia(mediaType: mediaType)
         let itemCount = results!.count
         setUploadButtons(enable: false)
+        let origAlbumName = getAlbumString()
 
         DispatchQueue.global(qos: .background).async {
             self.getTimestamps()
-            self.startUploads(mediaType: mediaType)
+            self.startUploads(origAlbumName: origAlbumName, mediaType: mediaType)
 
             // Show final status message after all uploads complete
             DispatchQueue.main.async {
+                self.uploading = false
                 if (self.failedUploadCount > 0) {
                     self.statusMessage.text = self.getSomeUploadsFailedMsg(mediaType: mediaType, itemCount: itemCount)
                 } else {
