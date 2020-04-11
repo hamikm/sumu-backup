@@ -66,6 +66,7 @@ class ViewController: UIViewController {
     static let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
     static let DEFAULT_ALBUM_NAME = "default"
     static let RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS = DispatchTimeInterval.seconds(5)
+    static let JPEG_COMPRESSION_QUALITY = CGFloat(1)
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -121,30 +122,66 @@ extension ViewController {
         var num: Int = 0
         var failed = false
         let finalAssetResource = getFinalAssetResource(asset: asset, mediaType: mediaType, isLivePhoto: isLivePhoto)
+        let filename = finalAssetResource.originalFilename
+        let splitFilename = filename.split(separator: ".")
+        let fileExtension = String(splitFilename[splitFilename.count - 1]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        // Get the asset resource chunks, upload them asyncronously, then do a final "concat" API call to stick the chunks together on the backend
-        let managerRequestOptions = PHAssetResourceRequestOptions()
-        managerRequestOptions.isNetworkAccessAllowed = true
-        let manager = PHAssetResourceManager.default()
-        manager.requestData(for: finalAssetResource, options: managerRequestOptions, dataReceivedHandler: { (dataChunk: Data) in
-            num += 1
-            self.sendChunkOverWireAsync(chunkBase64: dataChunk.base64EncodedString(), uuid: multipartUploadUuid, chunkNum: num)
-        }) { (err: Error? ) in
+        // If we got a HEIC image, we need to use PhotoManager to get another file type instead
+        if fileExtension == "heic" {
+            let requestOptions = PHImageRequestOptions()
+            requestOptions.isSynchronous = true
+            requestOptions.deliveryMode = .highQualityFormat
+            requestOptions.resizeMode = .none
+            requestOptions.isNetworkAccessAllowed = true
 
-            // Completion handler: wait until all chunks finish uploading to do final API call to concat the uploaded parts
-            self.sendChunkOverWireAsyncGroup.notify(queue: .global(qos: .background)) {
-                if err != nil {
-                    print ("Got an error in completion handler for multipart upload:", err!)
+            let manager = PHImageManager.default()
+            manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: requestOptions) { (img, info) in
+                guard let img = img else {
+                    print ("HEIC image retrieved from PHImageManager was nil")
                     failed = true
-                } else {
-                    if !self.finalizeMultipartUpload(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, uuid: multipartUploadUuid, numParts: num, isLivePhoto: isLivePhoto) {
-                        print ("Error when completing multipart upload!")
+                    self.handleAssetMutex.signal()
+                    return
+                }
+
+                // Upload a single chunk containing the whole heic image as a jpeg
+                let imgB64 = img.jpegData(compressionQuality: ViewController.JPEG_COMPRESSION_QUALITY)!.base64EncodedString()
+                self.sendChunkOverWireAsync(chunkBase64: imgB64, uuid: multipartUploadUuid, chunkNum: 1)
+
+                // Finalize the upload
+                self.sendChunkOverWireAsyncGroup.notify(queue: .global(qos: .background)) {
+                    if !self.finalizeMultipartUpload(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, uuid: multipartUploadUuid, numParts: 1, isLivePhoto: isLivePhoto, fileExtension: "jpg") {
+                        print ("Error when completing HEIC multipart upload!")
                         failed = true
                     }
+                    self.handleAssetMutex.signal()
                 }
-                self.handleAssetMutex.signal()
+            }
+        } else {
+            // Get the asset resource chunks, upload them asyncronously, then do a final "concat" API call to stick the chunks together on the backend
+            let managerRequestOptions = PHAssetResourceRequestOptions()
+            managerRequestOptions.isNetworkAccessAllowed = true
+            let manager = PHAssetResourceManager.default()
+            manager.requestData(for: finalAssetResource, options: managerRequestOptions, dataReceivedHandler: { (dataChunk: Data) in
+                num += 1
+                self.sendChunkOverWireAsync(chunkBase64: dataChunk.base64EncodedString(), uuid: multipartUploadUuid, chunkNum: num)
+            }) { (err: Error? ) in
+
+                // Completion handler: wait until all chunks finish uploading to do final API call to concat the uploaded parts
+                self.sendChunkOverWireAsyncGroup.notify(queue: .global(qos: .background)) {
+                    if err != nil {
+                        print ("Got an error in completion handler for multipart upload:", err!)
+                        failed = true
+                    } else {
+                        if !self.finalizeMultipartUpload(album: album, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, uuid: multipartUploadUuid, numParts: num, isLivePhoto: isLivePhoto, fileExtension: fileExtension) {
+                            print ("Error when completing multipart upload!")
+                            failed = true
+                        }
+                    }
+                    self.handleAssetMutex.signal()
+                }
             }
         }
+
         _ = handleAssetMutex.wait(timeout: .distantFuture)
 
         if failed {
@@ -213,7 +250,7 @@ extension ViewController {
         }).resume()
     }
 
-    func finalizeMultipartUpload(album: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, uuid: String, numParts: Int, isLivePhoto: Bool) -> Bool {
+    func finalizeMultipartUpload(album: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, uuid: String, numParts: Int, isLivePhoto: Bool, fileExtension: String) -> Bool {
         let sesh = URLSession(configuration: .default)
         var req = URLRequest(url: getUrl(endpoint: "save"))
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -229,7 +266,8 @@ extension ViewController {
             "v": (mediaType == .image ? false : true),
             "d": uuid,
             "n": numParts,
-            "l": isLivePhoto
+            "l": isLivePhoto,
+            "x": fileExtension
         ]
 
         var failed = false

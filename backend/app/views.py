@@ -10,8 +10,6 @@ PW = 'beeblesissuchameerkat'
 ENV = os.environ.get('SUMU_BACKUP_ENV') or 'prod'
 ROOT_DIR_DEV = '.'
 ROOT_DIR_PROD = '/opt/plexmedia'
-IMG_EXTENSION = 'png'
-VIDEO_EXTENSION = 'mp4'
 FILENAME_FORMAT = '{timestamp}_{uuid}.{extension}'
 USER_DIRECTORY = '{root}/{user}'
 DIRECTORY_TO_WRITE_FILES = '{userdir}/{album}'
@@ -136,11 +134,11 @@ def uploadPart():
         return makeError(500, str(err))
     return jsonify('')
 
-def getFilenames(rowDict, album):
+def getFilenames(rowDict, album, fileExtension):
     relativeFilename = FILENAME_FORMAT.format(
         timestamp=rowDict.get('creationTimestamp'),
         uuid=rowDict.get('id'),
-        extension=(IMG_EXTENSION if not rowDict.get('isVideo') else VIDEO_EXTENSION)
+        extension=fileExtension
     )
     userDirectory = USER_DIRECTORY.format(
         root=ROOT_DIR_PROD if ENV == 'prod' else ROOT_DIR_DEV,
@@ -183,6 +181,11 @@ def argsSave(body):
         errMsg = 'Need temporary uuid'
         raise Exception(errMsg)
 
+    fileExtension = body.get('x')
+    if type(fileExtension) is not str or len(fileExtension) == 0:
+        errMsg = 'Need nonempty file suffix'
+        raise Exception(errMsg)
+
     # map from wire model
     rowDict = {
         'id': str(uuid.uuid4()),
@@ -194,7 +197,7 @@ def argsSave(body):
         'isVideo': body.get('v'),
         'isLivePhoto': body.get('l')
     }
-    absPath, absFavePath, directory, faveDirectory = getFilenames(rowDict, album)
+    absPath, absFavePath, directory, faveDirectory = getFilenames(rowDict, album, fileExtension)
     rowDict['absoluteFilename'] = absPath
 
     # validate the metadata
