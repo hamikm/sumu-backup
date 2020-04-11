@@ -175,6 +175,7 @@ def argsSave(body):
     if type(album) is not str or len(album) == 0:
         errMsg = 'Need nonempty album name'
         raise Exception(errMsg)
+    album = '_'.join(album.strip().split())
 
     tmpUuid = body.get('d')
     if type(tmpUuid) is not str or len(tmpUuid) != UUID_LEN:
