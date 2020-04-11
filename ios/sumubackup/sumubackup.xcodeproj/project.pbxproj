@@ -13,7 +13,6 @@
 		4C8BFEAA2431694F0035DCA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4C8BFEA92431694F0035DCA7 /* Assets.xcassets */; };
 		4C8BFEAD2431694F0035DCA7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 4C8BFEAB2431694F0035DCA7 /* LaunchScreen.storyboard */; };
 		4C8BFEB62439A5070035DCA7 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C8BFEB52439A5070035DCA7 /* SceneDelegate.swift */; };
-		4C8BFEB8243A5FB50035DCA7 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C8BFEB7243A5FB50035DCA7 /* Utilities.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,9 +23,7 @@
 		4C8BFEA92431694F0035DCA7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4C8BFEAC2431694F0035DCA7 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		4C8BFEAE2431694F0035DCA7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		4C8BFEB424392BBB0035DCA7 /* BridgingHeader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BridgingHeader.h; sourceTree = "<group>"; };
 		4C8BFEB52439A5070035DCA7 /* SceneDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
-		4C8BFEB7243A5FB50035DCA7 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -43,7 +40,6 @@
 		4C8BFE942431694E0035DCA7 = {
 			isa = PBXGroup;
 			children = (
-				4C8BFEB424392BBB0035DCA7 /* BridgingHeader.h */,
 				4C8BFE9F2431694E0035DCA7 /* sumubackup */,
 				4C8BFE9E2431694E0035DCA7 /* Products */,
 			);
@@ -67,7 +63,6 @@
 				4C8BFEA92431694F0035DCA7 /* Assets.xcassets */,
 				4C8BFEAB2431694F0035DCA7 /* LaunchScreen.storyboard */,
 				4C8BFEAE2431694F0035DCA7 /* Info.plist */,
-				4C8BFEB7243A5FB50035DCA7 /* Utilities.swift */,
 			);
 			path = sumubackup;
 			sourceTree = "<group>";
@@ -146,7 +141,6 @@
 				4C8BFEA52431694E0035DCA7 /* ViewController.swift in Sources */,
 				4C8BFEA12431694E0035DCA7 /* AppDelegate.swift in Sources */,
 				4C8BFEB62439A5070035DCA7 /* SceneDelegate.swift in Sources */,
-				4C8BFEB8243A5FB50035DCA7 /* Utilities.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -299,7 +293,6 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sumu.sumubackup;
 				PRODUCT_NAME = "Bailey's Backup";
-				SWIFT_OBJC_BRIDGING_HEADER = BridgingHeader.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -318,7 +311,6 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sumu.sumubackup;
 				PRODUCT_NAME = "Bailey's Backup";
-				SWIFT_OBJC_BRIDGING_HEADER = BridgingHeader.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};

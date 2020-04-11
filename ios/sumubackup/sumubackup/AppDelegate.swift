@@ -28,21 +28,3 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Use this method to release any resources that were specific to the discarded scenes, as they will not return.
     }
 }
-
-
-extension UIImage {
-
-    public func sha256() -> String {
-        if let imageData = cgImage?.dataProvider?.data as Data? {
-            return Utilities.HexStringFromData(input: Utilities.Digest(input: imageData as NSData))
-        }
-        return ""
-    }
-}
-
-extension Data  {
-
-    public func sha256() -> String {
-        return Utilities.HexStringFromData(input: Utilities.Digest(input: self as NSData))
-    }
-}
