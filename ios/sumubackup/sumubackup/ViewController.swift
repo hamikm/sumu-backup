@@ -509,7 +509,7 @@ extension ViewController {
         return uploadCompleteIfRequired.count
     }
 
-    // Increments timestamp number by 1 ms until it gets to a timestamp that's not present in the current getMedia results. NOTE: this method might choose a timestamp that's already on the backend, in which case the asset that uses it will not be uploaded. Since this method is only used to spread timestamps for edge case photos from WhatsApp or shared albums, I think the risk is OK.
+    // Increments timestamp number by 1 ms until it gets to a timestamp that's not present in the current getMedia results. NOTE: this method might choose a timestamp that's already on the backend, in which case the asset that uses it will not be uploaded. Since this method is only used to spread timestamps for edge case photos from WhatsApp or shared albums, I think the risk is OK. The reason we don't check if the chosen timestamp is on the backend BEFORE trying to use it is we would end up uploading these images or videos every time.
     func getNextAvailableTimestamp(from startingTimestamp: UInt64, offset: Int) -> UInt64 {
         if offset == 0 {
             return startingTimestamp
