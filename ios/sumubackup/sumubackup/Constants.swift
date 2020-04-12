@@ -11,7 +11,7 @@ import UIKit
 
 class Constants: NSObject {
 
-    static let SERVER = "galadriel"
+    static let SERVER = "vingilot"
     static let HEALTH_URL = "http://\(SERVER):9090/health"
     static let TIMESTAMPS_URL = "http://\(SERVER):9090/timestamps"
     static let PART_URL = "http://\(SERVER):9090/part"
