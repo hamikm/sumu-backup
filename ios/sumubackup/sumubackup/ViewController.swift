@@ -18,16 +18,26 @@ class ViewController: UIViewController {
     @IBOutlet weak var uploadVideosButton: UIButton!
 
     // Instance variables
-    var hashMemos: [PHAsset: String]?
-    var assetsCount = 0
-    var timestampToAssetList: [UInt64: [PHAsset]]?
-    var uploadCompleteIfRequired: [UInt64: [Bool]]?
-    var duplicates: Int = 0
-    var timestamps: [UInt64: Bool] = [:]
-    var user: String = "vicky"
-    var uploading = false
-    var forceStopUploads = false
-    var showedWelcomeMsg = false
+    var timestampToAssetList: [UInt64: [PHAsset]]?  // map from timestamp to all assets with that timestamp
+    var hashMemos: [PHAsset: String]?  // used to store image or video SHAs to speed up the getMediaHashes method
+    var uploadCompleteIfRequired: [UInt64: [Bool]]?  // bitmap for successful uploads of all assets with particular timestamp
+    var assetsCount = 0  // total number of de-duped assets in timestampToAssetList
+    var numAlreadyOnBackend: Int = 0  // number of uploads that weren't attempted because the asset's already on the server
+    var timestamps: [UInt64: Bool] = [:]  // timestamps that have been seen on backend. nil if not seen, true if seen, false if it was seen an unexpected number of times (e.g., each live photo is stored on the server as a photo AND video, so it's timestamp should be seen exactly once. If it's seen once or three times, it will be mapped to false)
+    var user: String = "vicky"  // is vicky by default unless the device's name is goldberry
+    var uploading = false  // true if we're in the middle of an upload, false otherwise. Is used in isServerOnline watcher logic
+    var forceStopUploads = false  // used in isServerOnline logic to stop uploads until the server connection is re-established
+    var showedWelcomeMsg = false  // ensure that invitation to upload is only shown at launch and whenever it makes sense (e.g., after server comes online outside of an upload period)
+    var isServerOnline = false {  // keep checking if the server is online every few seconds
+        didSet {
+            isServerOnlineWatcherTasks(newValue: isServerOnline)
+
+            // Keep performing a liveness check in case the connection goes down
+            DispatchQueue.main.asyncAfter(deadline: .now() + Constants.RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS) {
+                self.checkIsServerOnline()
+            }
+        }
+    }
 
     // Locks for async handler wrangling
     var getMediaHashesMutex = DispatchSemaphore(value: 0)
@@ -39,47 +49,12 @@ class ViewController: UIViewController {
     var livenessCheckMutex = DispatchSemaphore(value: 0)
     var startUploadsGroup = DispatchGroup()
 
-    // Keep checking if the server is online every few seconds
-    var isServerOnline = false {
-        didSet {
-            isServerOnlineWatcherTasks(newValue: isServerOnline)
-
-            // Keep performing a liveness check in case the connection goes down
-            DispatchQueue.main.asyncAfter(deadline: .now() + ViewController.RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS) {
-                self.checkIsServerOnline()
-            }
-        }
-    }
-
-    // Templated strings used for status messages
-    static let CHECKING_SERVER_MSG = { (server: String) in "Checking if \(server) is online..." }
-    static let SERVER_OFFLINE_MSG = { (server: String) in "\(server) is offline." }
-    static let PREPARING_UPLOAD = "Preparing upload..."
-    static let WELCOME_MSG = { (server: String) in "Upload iPhone media to \(server)!" }
-    static let UPLOADING_MEDIA_MSG = { (type: String, number: Int, total: Int) in "Uploading \(type) \(String(number)) of \(String(total))..." }
-    static let UPLOADS_FINISHED_MSG = { (type: String) in "Uploads finished. Check Plex for your \(type); if they're there, you can delete them from your phone." }
-    static let SOME_UPLOADS_FAILED_MSG = { (type: String, number: Int, total: Int) in "\(String(number)) of \(String(total)) uploads failed. Careful when you delete \(type) from your phone!" }
-    static let FINAL_DUPLICATES_MSG = { (type: String, server: String, duplicates: Int) in "Did not upload \(String(duplicates)) \(type) because they were already on \(server)." }
-    static let DUPLICATE_MSG =  { (type: String, number: Int, total: Int) in "\(type) \(String(number)) of \(String(total)) is already on the server!" }
-    static let UPLOAD_INTERRUPTED_MSG = { (server: String) in "Lost connection to \(server) while uploading. Retrying..." }
-
-    // Constants
-    static let SERVER = "galadriel"
-    static let HEALTH_URL = "http://{host}:9090/health"
-    static let TIMESTAMPS_URL = "http://{host}:9090/timestamps"
-    static let PART_URL = "http://{host}:9090/part"
-    static let SAVE_URL = "http://{host}:9090/save"
-    static let HARD_CODED_PASSWORD_HOW_SHAMEFUL = "beeblesissuchameerkat"
-    static let DEFAULT_ALBUM_NAME = "default"
-    static let RETRY_SERVER_HEALTH_CHECK_INTERVAL_SECS = DispatchTimeInterval.seconds(5)
-    static let JPEG_COMPRESSION_QUALITY = CGFloat(1)
-
     override func viewDidLoad() {
         super.viewDidLoad()
-        UIApplication.shared.isIdleTimerDisabled = true
+        UIApplication.shared.isIdleTimerDisabled = true  // make sure screen won't dim and device won't go to sleep
         statusMessage.numberOfLines = 10
         statusMessage.lineBreakMode = .byWordWrapping
-        statusMessage.text = ViewController.CHECKING_SERVER_MSG(ViewController.SERVER)
+        statusMessage.text = Constants.CHECKING_SERVER_MSG
         if UIDevice.current.name.lowercased() == "goldberry" {
             user = "hamik"
         }
@@ -91,21 +66,20 @@ class ViewController: UIViewController {
             if uploading {  // if we were uploading when we lost the connection, then signal to the uploading code to continue
                 livenessCheckMutex.signal()
                 forceStopUploads = false
-            } else {
+            } else {  // re-enable buttons and show welcome message if we haven't or if the last message was "server offline"
                 setUploadButtons(enable: true)
-                // Show welcome message if we haven't already or if the last message shown was server offline one
-                if !showedWelcomeMsg || statusMessage.text == ViewController.SERVER_OFFLINE_MSG(ViewController.SERVER) {
-                    statusMessage.text = ViewController.WELCOME_MSG(ViewController.SERVER)
+                if !showedWelcomeMsg || statusMessage.text == Constants.SERVER_OFFLINE_MSG {
+                    statusMessage.text = Constants.WELCOME_MSG
                     showedWelcomeMsg = true
                 }
             }
         } else {  // if server is unreachable
             if uploading {  // and if we were in the middle of an upload
                 forceStopUploads = true
-                statusMessage.text = ViewController.UPLOAD_INTERRUPTED_MSG(ViewController.SERVER)
+                statusMessage.text = Constants.UPLOAD_INTERRUPTED_MSG
             } else {  //  but if we just opened the app or are between uploads
                 setUploadButtons(enable: false)
-                statusMessage.text = ViewController.SERVER_OFFLINE_MSG(ViewController.SERVER)
+                statusMessage.text = Constants.SERVER_OFFLINE_MSG
             }
         }
     }
@@ -114,7 +88,7 @@ class ViewController: UIViewController {
 // Video and image code
 extension ViewController {
 
-    // Find the desired asset resource; there are many resource types, like .photo, .fullSizePhoto, .video, .fullSizeVideo, .pairedVideo, .fullSizePairedVideo
+    // Find the desired asset resource FROM DISK. There are many resource types, like .photo, .fullSizePhoto, .video, .fullSizeVideo, .pairedVideo, .fullSizePairedVideo.
     func getFinalAssetResource(asset: PHAsset, mediaType: PHAssetMediaType, isLivePhoto: Bool) -> PHAssetResource? {
 
         // Determine preferred and backup resource types
@@ -143,7 +117,7 @@ extension ViewController {
         return chosenAssetResource
     }
 
-    // Upload asset in chunks, blocking until the upload is complete or errors out
+    // Upload asset in chunks, blocking until the upload is complete or errors out.
     func handleAsset(album: String, asset: PHAsset, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, isLivePhoto: Bool, originalTimestamp: UInt64, offset: Int) {
 
         // Set up to retrieve asset resource
@@ -175,7 +149,7 @@ extension ViewController {
                 }
 
                 // Upload a single chunk containing the whole heic image as a jpeg
-                let imgB64 = img.jpegData(compressionQuality: ViewController.JPEG_COMPRESSION_QUALITY)!.base64EncodedString()
+                let imgB64 = img.jpegData(compressionQuality: Constants.JPEG_COMPRESSION_QUALITY)!.base64EncodedString()
                 self.sendChunkOverWireAsync(chunkBase64: imgB64, uuid: multipartUploadUuid, chunkNum: 1)
 
                 // Finalize the upload after single chunk upload finishes
@@ -187,8 +161,7 @@ extension ViewController {
                     self.handleAssetMutex.signal()
                 }
             }
-        } else {
-            // Get the asset resource chunks, upload them asyncronously, then do a final "concat" API call to stick the chunks together on the backend
+        } else { // get the asset resource chunks, upload them asynchronously, then do a final "concat" API call to stick the chunks together on the backend
             let managerRequestOptions = PHAssetResourceRequestOptions()
             managerRequestOptions.isNetworkAccessAllowed = true
             let manager = PHAssetResourceManager.default()
@@ -218,179 +191,156 @@ extension ViewController {
             uploadCompleteIfRequired![originalTimestamp]![offset] = true
         }
     }
-}
 
-// API calls
-extension ViewController {
+    // Fetch media asset metadata, then collect it into a timestamp --> [PHAsset] dict (timestampToAssetList) with de-duped assets. Also set up a parallel timestamp --> [Bool] dict (uploadCompleteIfRequired) that flags completed uploads. Note that the metadata fetched here might describe an image, a video, a live video, a slow-mo video, etc. It might also describe an asset that's present on disk or only present in iCloud.
+    func getMedia(mediaType: PHAssetMediaType) {
 
-    func getTimestamps() {
-        timestamps = [:]
-        let sesh = URLSession(configuration: .default)
-        var req = URLRequest(url: getUrl(endpoint: "timestamps"))
-        req.httpMethod = "GET"
-        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
-            DispatchQueue.main.async {
-                if let data = data, let jsonData = try? JSONSerialization.jsonObject(with: data, options: .mutableContainers), let timestamps = jsonData as? [String: Bool] {
-                    for (t, exists) in timestamps {
-                        self.timestamps[UInt64(t)!] = exists
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        fetchOptions.includeAllBurstAssets = false
+        fetchOptions.includeAssetSourceTypes = [.typeCloudShared, .typeUserLibrary, .typeiTunesSynced]
+        let results = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
+
+        // Iterate over results to build dict of timeststamp to array of PHAssets. The array should be de-duped with SHAs
+        timestampToAssetList = [:]
+        uploadCompleteIfRequired = [:]
+        assetsCount = 0
+        hashMemos = [:]
+        for i in 0..<results.count {
+            autoreleasepool {
+                let asset = results[i]
+                let timestamp = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
+                let otherAssets = timestampToAssetList![timestamp]
+                if otherAssets == nil {
+                    timestampToAssetList![timestamp] = [asset]
+                    uploadCompleteIfRequired![timestamp] = [false]
+                } else {  // hash current image and compare it to the other images for this timestamp. If it's duped, skip
+                    let currentHash = getMediaHashes(from: [asset], mediaType: mediaType)[0]
+                    let otherHashes = getMediaHashes(from: otherAssets!, mediaType: mediaType)
+                    if otherHashes.contains(currentHash) {
+                        return
+                    }
+                    timestampToAssetList![timestamp]!.append(asset)
+                    uploadCompleteIfRequired![timestamp]!.append(false)
+                }
+                assetsCount += 1
+            }
+        }
+    }
+
+    // This method either recommends uploading, recommends not uploading, or crashes. These corresond to no timestamp seen, timestamp is mapped to true, and timestamp is mapped to false. On the backend, if timesSeen is None, then we should recommend uploading. If it's 1, we should recommend not uploading. If it's 1 but for a live photo, that doesn't make sense — we should crash, since timesSeen should be 2. If it's 2 but they're for the photo and video parts of a live photo, we should recommend not uploading. If it's 2 but not for live photo, we should crash. If 3 or greater, we should crash.
+    func shouldUpload(timestamp: UInt64) -> Bool {
+        guard let occursExactlyOnce = self.timestamps[timestamp] else {
+            return true
+        }
+        if !occursExactlyOnce {
+            print("There was a photo timestamp collision at", timestamp)
+            exit(1)
+        }
+        return false
+    }
+
+    // Iterate over the dict timestampToAssetList, including each asset in the array of PHAsset. Call getNextAvailableTimestamp to spread timestamps when the array's size > 1. If the asset's timestamp isn't on the server, then upload it.
+    func startUploads(origAlbumName: String, mediaType: PHAssetMediaType) {
+        guard let timestampToAssetList = timestampToAssetList else { return }
+
+        numAlreadyOnBackend = 0
+        var album = origAlbumName
+
+        var i = 0
+        let sortedTimestampToAssetListKeys = timestampToAssetList.keys.sorted(by: >)
+        let cumulativeAssetsBeforeTimestamp = Utilities.GetCumulativeAssetsBeforeTimestamp(within: timestampToAssetList, sortedKeys: sortedTimestampToAssetListKeys)
+        while i < sortedTimestampToAssetListKeys.count {  // iterate over keys in dict
+
+            autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
+                let origTimestamp = sortedTimestampToAssetListKeys[i]
+                let assetsWithTimestamp = timestampToAssetList[origTimestamp]!
+
+                for j in 0..<assetsWithTimestamp.count {  // iterate over the value in dict, which is an array of PHAsset
+                    let asset = assetsWithTimestamp[j]
+                    let latitude = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
+                    let longitude = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
+                    let isFavorite = asset.isFavorite
+                    let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
+                    let timestamp = Utilities.GetNextAvailableTimestamp(from: origTimestamp, offset: j, within: timestampToAssetList)
+                    let currentNum = cumulativeAssetsBeforeTimestamp[origTimestamp]! + j + 1
+
+                    // Choose a date-based album name if none was entered
+                    if origAlbumName == Constants.DEFAULT_ALBUM_NAME {
+                        let creationDate = asset.creationDate ?? Date()
+                        let formatter = DateFormatter()
+                        formatter.dateFormat = "yyyy-MM"
+                        album = formatter.string(from: creationDate)
+                    }
+
+                    // Just abort this upload attempt if the media is already on the backend
+                    if shouldUpload(timestamp: timestamp) {
+                        DispatchQueue.main.async { self.statusMessage.text = self.getUploadingMsg(mediaType: mediaType, assetNum: currentNum, isLivePhoto: isLivePhoto) }
+
+                        handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, isLivePhoto: isLivePhoto, originalTimestamp: origTimestamp, offset: j)
+                        if isLivePhoto {
+                            handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .video, isLivePhoto: isLivePhoto, originalTimestamp: origTimestamp, offset: j)
+                        }
+                    } else {
+                        numAlreadyOnBackend += 1
+                        uploadCompleteIfRequired![origTimestamp]![j] = true
+                        DispatchQueue.main.async {
+                            self.statusMessage.text = Constants.DUPLICATE_MSG(mediaType == .image ? "Image" : "Video", i + 1, self.assetsCount)
+                        }
                     }
                 }
-                self.getTimestampsMutex.signal()
-            }
-        }).resume()
-        _ = getTimestampsMutex.wait(timeout: .distantFuture)
-    }
+                i += 1
 
-    func checkIsServerOnline(setInstanceVariable: Bool = true) {
-        let sesh = URLSession(configuration: .default)
-        var req = URLRequest(url: getUrl(endpoint: "health"))
-        req.httpMethod = "GET"
-        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
-            DispatchQueue.main.async {
-                let newValue = error == nil ? true : false
-                if (setInstanceVariable) {
-                    self.isServerOnline = newValue
-                } else {
-                    self.isServerOnlineWatcherTasks(newValue: newValue)
-                    self.beforeFinishingLastUploadMutex.signal()
+                // If we're about to leave the loop, wait for a health check on the server
+                if i == sortedTimestampToAssetListKeys.count {
+                    checkIsServerOnline(setInstanceVariable: false)
+                    _ = beforeFinishingLastUploadMutex.wait(timeout: .distantFuture)
+                }
+                if forceStopUploads {
+                    _ = livenessCheckMutex.wait(timeout: .distantFuture)
+                    i = Utilities.SupremumOfContiguousSuccessfulUploadIndices(within: uploadCompleteIfRequired!)
+                    getTimestamps()  // in case a successful upload snuck through
+                    return  // from this autoreleasepool closure
                 }
             }
-        }).resume()
-    }
-
-    // Uploads the given chunkNum-th chunk with the identifier uuid to the backend. Is fire and forget/async.
-    func sendChunkOverWireAsync(chunkBase64: String, uuid: String, chunkNum: Int) {
-        let sesh = URLSession(configuration: .default)
-        var req = URLRequest(url: getUrl(endpoint: "part"))
-        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpMethod = "POST"
-        let jsonObj: [String: Any?] = [
-            "p": ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL,
-            "i": chunkBase64,
-            "d": uuid,
-            "o": chunkNum,
-        ]
-
-        sendChunkOverWireAsyncGroup.enter()
-        let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: .fragmentsAllowed)
-        req.httpBody = data
-        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
-            if error != nil || (response as! HTTPURLResponse).statusCode != 200 {
-                print ("Chunk upload failed. Error:", error ?? "nil error")
-            }
-             self.sendChunkOverWireAsyncGroup.leave()
-        }).resume()
-    }
-
-    func finalizeMultipartUpload(album: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, uuid: String, numParts: Int, isLivePhoto: Bool, fileExtension: String) -> Bool {
-        let sesh = URLSession(configuration: .default)
-        var req = URLRequest(url: getUrl(endpoint: "save"))
-        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpMethod = "POST"
-        let jsonObj: [String: Any?] = [
-            "a": album, // second part of relative path on server
-            "p": ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL,
-            "u": user,  // user name, used as first path of relative path on server where photos will be stored
-            "t": timestamp,
-            "lat": latitude,
-            "long": longitude,
-            "f": isFavorite,
-            "v": (mediaType == .image ? false : true),
-            "d": uuid,
-            "n": numParts,
-            "l": isLivePhoto,
-            "x": fileExtension
-        ]
-
-        var failed = false
-        let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: .fragmentsAllowed)
-        req.httpBody = data
-        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
-            if error != nil || (response as! HTTPURLResponse).statusCode != 200 {
-                print ("Final multipart call failed. Error:", error ?? "nil error")
-                failed = true
-            }
-            self.finalizeMultipartUploadMutex.signal()
-        }).resume()
-        _ = finalizeMultipartUploadMutex.wait(timeout: .distantFuture)
-        return !failed
-    }
-
-    func getUrl(endpoint: String) -> URL {
-        let urlTemplate: String?
-        var params = ""
-        let passParam = "?p=" + ViewController.HARD_CODED_PASSWORD_HOW_SHAMEFUL
-        switch endpoint {
-        case "health":
-            urlTemplate = ViewController.HEALTH_URL
-            params = passParam
-        case "timestamps":
-            urlTemplate = ViewController.TIMESTAMPS_URL
-            params = passParam + "&u=" + user
-        case "part":
-            urlTemplate = ViewController.PART_URL
-        case "save":
-            urlTemplate = ViewController.SAVE_URL
-        default:
-            urlTemplate = nil
         }
-        let urlString = urlTemplate!.replacingOccurrences(of: "{host}", with: ViewController.SERVER) + params
-        return URL(string: urlString)!
+    }
+
+    // Fetch media metadata, get the data from disk or iCloud, then upload it to the server.
+    func uploadMedia(mediaType: PHAssetMediaType) {
+        setUploadButtons(enable: false)
+        let origAlbumName = getAlbumString()
+        statusMessage.text = Constants.PREPARING_UPLOAD
+
+        DispatchQueue.global(qos: .background).async {
+            self.getMedia(mediaType: mediaType)
+            self.getTimestamps()
+            self.startUploads(origAlbumName: origAlbumName, mediaType: mediaType)
+
+            // Show final status message after all uploads complete
+            DispatchQueue.main.async {
+                self.uploading = false
+                let numFailedUploads = Utilities.GetNumFailedUploads(within: self.uploadCompleteIfRequired!)
+                if (numFailedUploads > 0) {
+                    self.statusMessage.text = self.getSomeUploadsFailedMsg(mediaType: mediaType, numFailedUploads: numFailedUploads)
+                } else {
+                    self.statusMessage.text = self.getUploadsFinishedMsg(mediaType: mediaType)
+                }
+                self.setUploadButtons(enable: true)
+            }
+        }
     }
 }
 
-// Status message getters
+// Local utilities
 extension ViewController {
-
-    func getDuplicatesMsg(mediaType: PHAssetMediaType) -> String {
-        return self.duplicates > 0 ? " " + ViewController.FINAL_DUPLICATES_MSG((mediaType == .image ? "image(s)" : "video(s)"), ViewController.SERVER, self.duplicates) : ""
-    }
-
-    func getSomeUploadsFailedMsg(mediaType: PHAssetMediaType, numFailedUploads: Int) -> String {
-        return ViewController.SOME_UPLOADS_FAILED_MSG(mediaType == .image ? "images" : "videos", numFailedUploads, self.assetsCount) + self.getDuplicatesMsg(mediaType: mediaType)
-    }
-
-    func getUploadsFinishedMsg(mediaType: PHAssetMediaType) -> String {
-        return ViewController.UPLOADS_FINISHED_MSG(mediaType == .image ? "images" : "videos") + self.getDuplicatesMsg(mediaType: mediaType)
-    }
-
-    func getUploadingMsg(mediaType: PHAssetMediaType, assetNum: Int, isLivePhoto: Bool) -> String {
-        var mediaTypeString = mediaType == .image ? "image" : "video"
-        mediaTypeString = isLivePhoto ? "live photo" : mediaTypeString
-        return ViewController.UPLOADING_MEDIA_MSG(mediaTypeString, assetNum, self.assetsCount)
-    }
-}
-
-// Handlers and utility funcitons for UI elements
-extension ViewController {
-
-    @IBAction func uploadPhotosHandler(_ sender: UIButton, forEvent event: UIEvent) {
-        uploading = true
-        uploadMedia(mediaType: .image)
-    }
-
-    @IBAction func uploadVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
-        uploading = true
-        uploadMedia(mediaType: .video)
-    }
-
-    @IBAction func tapHandler(_ sender: UITapGestureRecognizer) {
-        albumField.resignFirstResponder()
-    }
-
-    @IBAction func albumEnteredHandler(_ sender: UITextField, forEvent event: UIEvent) {
-        albumField.resignFirstResponder()
-    }
 
     func setUploadButtons(enable: Bool) {
         uploadPhotosButton.isEnabled = enable
         uploadVideosButton.isEnabled = enable
     }
 
-    func getAlbumString() -> String {
-        return (albumField.text == nil || albumField.text!.count == 0) ? ViewController.DEFAULT_ALBUM_NAME : albumField.text!
-    }
-
+    // Return the hashes of the full size images or videos corresponding to the the given array of assets.
     func getMediaHashes(from assets: [PHAsset], mediaType: PHAssetMediaType) -> [String] {
         guard let hashMemos = hashMemos else { return [] }
         var hashes: [String] = []
@@ -444,201 +394,174 @@ extension ViewController {
         }
         return hashes
     }
+}
 
-    func getMedia(mediaType: PHAssetMediaType) {
+// API calls
+extension ViewController {
 
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.includeAllBurstAssets = false
-        fetchOptions.includeAssetSourceTypes = [.typeCloudShared, .typeUserLibrary, .typeiTunesSynced]
-        let results = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
-
-        // Iterate over results to build dict of timeststamp to array of PHAssets. The array should be de-duped with SHAs
-        timestampToAssetList = [:]
-        uploadCompleteIfRequired = [:]
-        assetsCount = 0
-        hashMemos = [:]
-        for i in 0..<results.count {
-            autoreleasepool {
-                let asset = results[i]
-                let timestamp = UInt64((asset.creationDate ?? Date()).timeIntervalSince1970.magnitude * 1000)
-                let otherAssets = timestampToAssetList![timestamp]
-                if otherAssets == nil {
-                    timestampToAssetList![timestamp] = [asset]
-                    uploadCompleteIfRequired![timestamp] = [false]
-                } else {  // hash current image and compare it to the other images for this timestamp. If it's duped, skip
-                    let currentHash = getMediaHashes(from: [asset], mediaType: mediaType)[0]
-                    let otherHashes = getMediaHashes(from: otherAssets!, mediaType: mediaType)
-                    if otherHashes.contains(currentHash) {
-                        return
+    // Syncronous method that gets known timestamps from backend. See shouldUpload for a complete discussion of the meaning of the values in the timestamps dict.
+    func getTimestamps() {
+        timestamps = [:]
+        let sesh = URLSession(configuration: .default)
+        var req = URLRequest(url: getUrl(endpoint: "timestamps"))
+        req.httpMethod = "GET"
+        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
+            DispatchQueue.main.async {
+                if let data = data, let jsonData = try? JSONSerialization.jsonObject(with: data, options: .mutableContainers), let timestamps = jsonData as? [String: Bool] {
+                    for (t, exists) in timestamps {
+                        self.timestamps[UInt64(t)!] = exists
                     }
-                    timestampToAssetList![timestamp]!.append(asset)
-                    uploadCompleteIfRequired![timestamp]!.append(false)
                 }
-                assetsCount += 1
+                self.getTimestampsMutex.signal()
             }
-        }
+        }).resume()
+        _ = getTimestampsMutex.wait(timeout: .distantFuture)
     }
 
-    // This method either recommends uploading, recommends not uploading, or crashes. These corresond to no timestamp seen, timestamp is mapped to true, and timestamp is mapped to false. On the backend, if timesSeen is None, then we should recommend uploading. If it's 1, we should recommend not uploading. If it's 1 but for a live photo, that doesn't make sense — we should crash, since timesSeen should be 2. If it's 2 but they're for the photo and video parts of a live photo, we should recommend not uploading. If it's 2 but not for live photo, we should crash. If 3 or greater, we should crash.
-    func shouldUpload(timestamp: UInt64) -> Bool {
-        guard let occursExactlyOnce = self.timestamps[timestamp] else {
-            return true
-        }
-        if !occursExactlyOnce {
-            print("There was a photo timestamp collision at", timestamp)
+    // Set isServerOnline, which kicks off some watcher tasks AND schedules another checkIsServerOnline call for a few seconds later. Set setInstanceVariable to false to kick off watcher tasks WITHOUT scheduling another checkIsServerOnline call, which is useful if you have to manually call this function instead of relying on the automatically scheduled ones initiated by the call in viewDidLoad. This method is async if setInstanceVariable is true, synchronous otherwise (controlled by beforeFinishingLastUploadMutex)
+    func checkIsServerOnline(setInstanceVariable: Bool = true) {
+        let sesh = URLSession(configuration: .default)
+        var req = URLRequest(url: getUrl(endpoint: "health"))
+        req.httpMethod = "GET"
+        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
+            DispatchQueue.main.async {
+                let newValue = error == nil ? true : false
+                if (setInstanceVariable) {
+                    self.isServerOnline = newValue
+                } else {
+                    self.isServerOnlineWatcherTasks(newValue: newValue)
+                    self.beforeFinishingLastUploadMutex.signal()
+                }
+            }
+        }).resume()
+    }
+
+    // Uploads the given chunk with the identifier uuid to the backend. This method is asynchronous, but it signals to sendChunkOverWireAsyncGroup so we can wait on completion of all chunk uploads as a group. I.e., each call is async but the group of calls is synchronous, assuming we enter the next chunk-upload before we leave all the previous ones. That seems like a reasonable assumption, since network uploads are much slower than disk access, but if the assumption is violated and finalizeMultipartUpload is kicked off prematurely, that call will fail and the user will (1) see a message about it after all uploads are finished, and (2) will be able to upload it again automatically next time they initiate a batch upload.
+    func sendChunkOverWireAsync(chunkBase64: String, uuid: String, chunkNum: Int) {
+        sendChunkOverWireAsyncGroup.enter()
+        let sesh = URLSession(configuration: .default)
+        var req = URLRequest(url: getUrl(endpoint: "part"))
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpMethod = "POST"
+        let jsonObj: [String: Any?] = [
+            "p": Constants.HARD_CODED_PASSWORD_HOW_SHAMEFUL,
+            "i": chunkBase64,
+            "d": uuid,
+            "o": chunkNum,
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: .fragmentsAllowed)
+        req.httpBody = data
+        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
+            if error != nil || (response as! HTTPURLResponse).statusCode != 200 {
+                print ("Chunk upload failed. Error:", error ?? "nil error")
+            }
+             self.sendChunkOverWireAsyncGroup.leave()
+        }).resume()
+    }
+
+    // Sends metadata for image or video identified by uuid to backend. Assumes that the media has already been uploaded and that all chunks have finished uploading, because this call starts concatenating those chunks. After it's done, it cleans up the temporary chunk files and writes metadata like latitude, isFavorite, etc. to the database. This method is synchronous.
+    func finalizeMultipartUpload(album: String, timestamp: UInt64, latitude: Double?, longitude: Double?, isFavorite: Bool, mediaType: PHAssetMediaType, uuid: String, numParts: Int, isLivePhoto: Bool, fileExtension: String) -> Bool {
+        let sesh = URLSession(configuration: .default)
+        var req = URLRequest(url: getUrl(endpoint: "save"))
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpMethod = "POST"
+        let jsonObj: [String: Any?] = [
+            "a": album, // second part of relative path on server
+            "p": Constants.HARD_CODED_PASSWORD_HOW_SHAMEFUL,
+            "u": user,  // user name, used as first path of relative path on server where photos will be stored
+            "t": timestamp,
+            "lat": latitude,
+            "long": longitude,
+            "f": isFavorite,
+            "v": (mediaType == .image ? false : true),
+            "d": uuid,
+            "n": numParts,
+            "l": isLivePhoto,
+            "x": fileExtension
+        ]
+
+        var failed = false
+        let data = try! JSONSerialization.data(withJSONObject: jsonObj, options: .fragmentsAllowed)
+        req.httpBody = data
+        _ = sesh.dataTask(with: req, completionHandler: { (data, response, error) in
+            if error != nil || (response as! HTTPURLResponse).statusCode != 200 {
+                print ("Final multipart call failed. Error:", error ?? "nil error")
+                failed = true
+            }
+            self.finalizeMultipartUploadMutex.signal()
+        }).resume()
+        _ = finalizeMultipartUploadMutex.wait(timeout: .distantFuture)
+        return !failed
+    }
+
+    // Gets URL for the given endpoint, including param part.
+    func getUrl(endpoint: String) -> URL {
+        var urlStringWithoutParams = ""
+        var params = ""
+        let passParam = "?p=" + Constants.HARD_CODED_PASSWORD_HOW_SHAMEFUL
+        switch endpoint {
+        case "health":
+            urlStringWithoutParams = Constants.HEALTH_URL
+            params = passParam
+        case "timestamps":
+            urlStringWithoutParams = Constants.TIMESTAMPS_URL
+            params = passParam + "&u=" + user
+        case "part":
+            urlStringWithoutParams = Constants.PART_URL
+        case "save":
+            urlStringWithoutParams = Constants.SAVE_URL
+        default:
+            print("Unsupported endpoint:", endpoint)
             exit(1)
         }
-        return false
+        return URL(string: urlStringWithoutParams + params)!
+    }
+}
+
+// Status message and other getters
+extension ViewController {
+
+    func getDuplicatesMsg(mediaType: PHAssetMediaType) -> String {
+        return self.numAlreadyOnBackend > 0 ? " " + Constants.FINAL_DUPLICATES_MSG((mediaType == .image ? "image(s)" : "video(s)"), self.numAlreadyOnBackend) : ""
     }
 
-    // uploadCompleteIfRequired is a bitmap for successful uploads of assets associated with a particular timestamp. This method returns the index of the first timestamp such that some of its assets failed to asset
-    func supremumOfContiguousSuccessfulUploadIndices() -> Int {
-        guard let uploadCompleteIfRequired = uploadCompleteIfRequired else {
-            print ("uploadCompleteIfRequired is nil")
-            return Int.max
-        }
-        let sortedUploadCompleteIfRequiredKeys = uploadCompleteIfRequired.keys.sorted(by: >)
-        for i in 0..<sortedUploadCompleteIfRequiredKeys.count {
-            let key = sortedUploadCompleteIfRequiredKeys[i]
-            let assetUploadedList = uploadCompleteIfRequired[key]!
-            if !assetUploadedList.allSatisfy({ $0 == true }) {
-                return i
-            }
-        }
-        return uploadCompleteIfRequired.count
+    func getSomeUploadsFailedMsg(mediaType: PHAssetMediaType, numFailedUploads: Int) -> String {
+        return Constants.SOME_UPLOADS_FAILED_MSG(mediaType == .image ? "images" : "videos", numFailedUploads, self.assetsCount) + self.getDuplicatesMsg(mediaType: mediaType)
     }
 
-    // Increments timestamp number by 1 ms until it gets to a timestamp that's not present in the current getMedia results. NOTE: this method might choose a timestamp that's already on the backend, in which case the asset that uses it will not be uploaded. Since this method is only used to spread timestamps for edge case photos from WhatsApp or shared albums, I think the risk is OK. The reason we don't check if the chosen timestamp is on the backend BEFORE trying to use it is we would end up uploading these images or videos every time.
-    func getNextAvailableTimestamp(from startingTimestamp: UInt64, offset: Int) -> UInt64 {
-        if offset == 0 {
-            return startingTimestamp
-        }
-        var candidateTimestamp = getNextAvailableTimestamp(from: startingTimestamp, offset: offset - 1) + 1
-        let currentTimestamps = timestampToAssetList!.keys
-        while currentTimestamps.contains(candidateTimestamp) {
-            candidateTimestamp += 1
-        }
-        return candidateTimestamp
+    func getUploadsFinishedMsg(mediaType: PHAssetMediaType) -> String {
+        return Constants.UPLOADS_FINISHED_MSG(mediaType == .image ? "images" : "videos") + self.getDuplicatesMsg(mediaType: mediaType)
     }
 
-    // Used to track image upload number
-    func getCumulativeAssetsBeforeTimestamp(sortedKeys: [UInt64]) -> [UInt64: Int] {
-        var ret: [UInt64: Int] = [:]
-        for i in 0..<sortedKeys.count {
-            let currentTimestamp = sortedKeys[i]
-            if i == 0 {
-                ret[currentTimestamp] = 0
-                continue
-            }
-            let previousTimestamp = sortedKeys[i - 1]
-            let previousArray = timestampToAssetList![previousTimestamp]!
-            ret[currentTimestamp] = ret[previousTimestamp]! + previousArray.count
-        }
-        return ret
+    func getUploadingMsg(mediaType: PHAssetMediaType, assetNum: Int, isLivePhoto: Bool) -> String {
+        var mediaTypeString = mediaType == .image ? "image" : "video"
+        mediaTypeString = isLivePhoto ? "live photo" : mediaTypeString
+        return Constants.UPLOADING_MEDIA_MSG(mediaTypeString, assetNum, self.assetsCount)
     }
 
-    func startUploads(origAlbumName: String, mediaType: PHAssetMediaType) {
-        guard let timestampToAssetList = timestampToAssetList else { return }
+    func getAlbumString() -> String {
+        return (albumField.text == nil || albumField.text!.count == 0) ? Constants.DEFAULT_ALBUM_NAME : albumField.text!
+    }
+}
 
-        duplicates = 0
-        var album = origAlbumName
+// Handlers for UI elements
+extension ViewController {
 
-        // Iterate over the dict timestampToAssetList. Call getNextAvailableTimestamp to spread timestamps when multiple assets have the same creation date.
-        var i = 0
-        let sortedTimestampToAssetListKeys = timestampToAssetList.keys.sorted(by: >)
-        let cumulativeAssetsBeforeTimestamp = getCumulativeAssetsBeforeTimestamp(sortedKeys: sortedTimestampToAssetListKeys)
-        while i < sortedTimestampToAssetListKeys.count {  // iterate over keys in dict
-
-            autoreleasepool { // make sure memory is freed, otherwise a few big files will crash the app
-                let origTimestamp = sortedTimestampToAssetListKeys[i]
-                let assetsWithTimestamp = timestampToAssetList[origTimestamp]!
-
-                for j in 0..<assetsWithTimestamp.count {  // iterate over the value in dict, which is an array of PHAsset
-                    let asset = assetsWithTimestamp[j]
-                    let latitude = asset.location == nil ? nil : asset.location?.coordinate.latitude.nextUp
-                    let longitude = asset.location == nil ? nil : asset.location?.coordinate.longitude.nextUp
-                    let isFavorite = asset.isFavorite
-                    let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
-                    let timestamp = getNextAvailableTimestamp(from: origTimestamp, offset: j)
-                    let currentNum = cumulativeAssetsBeforeTimestamp[origTimestamp]! + j + 1
-
-                    // Choose a date-based album name if none was entered
-                    if origAlbumName == ViewController.DEFAULT_ALBUM_NAME {
-                        let creationDate = asset.creationDate ?? Date()
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "yyyy-MM"
-                        album = formatter.string(from: creationDate)
-                    }
-
-                    // Just abort this upload attempt if the media is already on the backend
-                    if shouldUpload(timestamp: timestamp) {
-                        DispatchQueue.main.async { self.statusMessage.text = self.getUploadingMsg(mediaType: mediaType, assetNum: currentNum, isLivePhoto: isLivePhoto) }
-
-                        handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: mediaType, isLivePhoto: isLivePhoto, originalTimestamp: origTimestamp, offset: j)
-                        if isLivePhoto {
-                            handleAsset(album: album, asset: asset, timestamp: timestamp, latitude: latitude, longitude: longitude, isFavorite: isFavorite, mediaType: .video, isLivePhoto: isLivePhoto, originalTimestamp: origTimestamp, offset: j)
-                        }
-                    } else {
-                        duplicates += 1
-                        uploadCompleteIfRequired![origTimestamp]![j] = true
-                        DispatchQueue.main.async {
-                            self.statusMessage.text = ViewController.DUPLICATE_MSG("video", i + 1, self.assetsCount)
-                        }
-                    }
-                }
-                i += 1
-
-                // If we're about to leave the loop, wait for a health check on the server
-                if i == sortedTimestampToAssetListKeys.count {
-                    checkIsServerOnline(setInstanceVariable: false)
-                    _ = beforeFinishingLastUploadMutex.wait(timeout: .distantFuture)
-                }
-                if forceStopUploads {
-                    _ = livenessCheckMutex.wait(timeout: .distantFuture)
-                    i = supremumOfContiguousSuccessfulUploadIndices()
-                    getTimestamps()  // in case a successful upload snuck through
-                    return  // from this autoreleasepool closure
-                }
-            }
-        }
+    @IBAction func uploadPhotosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        uploading = true
+        uploadMedia(mediaType: .image)
     }
 
-    func getNumFailedUploads() -> Int {
-        guard let uploadCompleteIfRequired = uploadCompleteIfRequired else { return 0 }
-        var failures = 0
-        for (_, boolArray) in uploadCompleteIfRequired {
-            for bool in boolArray {
-                if !bool {
-                    failures += 1
-                }
-            }
-        }
-        return failures
+    @IBAction func uploadVideosHandler(_ sender: UIButton, forEvent event: UIEvent) {
+        uploading = true
+        uploadMedia(mediaType: .video)
     }
 
-    // Upload all media in timestampToAssetList dict
-    func uploadMedia(mediaType: PHAssetMediaType) {
-        setUploadButtons(enable: false)
-        let origAlbumName = getAlbumString()
-        statusMessage.text = ViewController.PREPARING_UPLOAD
+    @IBAction func tapHandler(_ sender: UITapGestureRecognizer) {
+        albumField.resignFirstResponder()
+    }
 
-        DispatchQueue.global(qos: .background).async {
-            self.getMedia(mediaType: mediaType)
-            self.getTimestamps()
-            self.startUploads(origAlbumName: origAlbumName, mediaType: mediaType)
-
-            // Show final status message after all uploads complete
-            DispatchQueue.main.async {
-                self.uploading = false
-                let numFailedUploads = self.getNumFailedUploads()
-                if (numFailedUploads > 0) {
-                    self.statusMessage.text = self.getSomeUploadsFailedMsg(mediaType: mediaType, numFailedUploads: numFailedUploads)
-                } else {
-                    self.statusMessage.text = self.getUploadsFinishedMsg(mediaType: mediaType)
-                }
-                self.setUploadButtons(enable: true)
-            }
-        }
+    @IBAction func albumEnteredHandler(_ sender: UITextField, forEvent event: UIEvent) {
+        albumField.resignFirstResponder()
     }
 }
