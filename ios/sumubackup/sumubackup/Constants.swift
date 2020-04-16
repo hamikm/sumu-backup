@@ -27,7 +27,7 @@ class Constants: NSObject {
     static let PREPARING_UPLOAD = "Preparing upload..."
     static let WELCOME_MSG = "Upload iPhone media to \(SERVER)!"
     static let UPLOADING_MEDIA_MSG = { (type: String, number: Int, total: Int) in "Uploading \(type) \(String(number)) of \(String(total))..." }
-    static let UPLOADS_FINISHED_MSG = { (type: String) in "Uploads finished. Check Plex for your \(type); if they're there, you can delete them from your phone." }
+    static let UPLOADS_FINISHED_MSG = { (type: String, number: Int) in "Finished with \(String(number)) \(type). Check Plex for your \(type) before deleting them from your phone." }
     static let SOME_UPLOADS_FAILED_MSG = { (type: String, number: Int, total: Int) in "\(String(number)) of \(String(total)) uploads failed. Careful when you delete \(type) from your phone!" }
     static let FINAL_DUPLICATES_MSG = { (type: String, numAlreadyOnBackend: Int) in "Did not upload \(String(numAlreadyOnBackend)) \(type) because they were already on \(SERVER)." }
     static let DUPLICATE_MSG =  { (type: String, number: Int, total: Int) in "\(type) \(String(number)) of \(String(total)) is already on the server!" }

@@ -530,7 +530,7 @@ extension ViewController {
     }
 
     func getUploadsFinishedMsg(mediaType: PHAssetMediaType) -> String {
-        return Constants.UPLOADS_FINISHED_MSG(mediaType == .image ? "images" : "videos") + self.getDuplicatesMsg(mediaType: mediaType)
+        return Constants.UPLOADS_FINISHED_MSG(mediaType == .image ? "images" : "videos", self.assetsCount) + self.getDuplicatesMsg(mediaType: mediaType)
     }
 
     func getUploadingMsg(mediaType: PHAssetMediaType, assetNum: Int, isLivePhoto: Bool) -> String {
