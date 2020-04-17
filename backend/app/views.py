@@ -2,7 +2,6 @@ from app import app, models, db
 from flask import request, jsonify
 import base64
 import uuid
-import pathlib
 import os
 import shutil
 import pathlib
@@ -52,7 +51,7 @@ def argsTimestamps(params):
 
     return user
 
-def mapTimesSeenToBool(timesSeenIsLivePhoto):
+def mapTimesSeenToBool(times, isLive):
     '''There are 3 outcomes: upload, not upload, crash. They corresond to None, True, False.
 
     If timesSeen is None, frontend should upload. If it's 1 and for a live photo, then upload was
@@ -62,12 +61,11 @@ def mapTimesSeenToBool(timesSeenIsLivePhoto):
     crash. If it's 2 but not for live photo, it should crash. If 3 or greater, it should crash.
     Crashing is so I'm forced to investigate what happened on the backend :-)
     '''
-    timesSeen, isLivePhoto, _ = timesSeenIsLivePhoto
-    if timesSeen == 1 and isLivePhoto:  # upload was prob. interrupted between photo and vid parts
+    if times == 1 and isLive:  # upload was prob. interrupted between photo and vid parts
         return None  # None means make the frontend do an upload
-    elif timesSeen == 1:  # if saw photo or video once and it's not live, makes sense, just skip
+    elif times == 1:  # if saw photo or video once and it's not live, makes sense, just skip
         return True  # true means make frontend skip an upload
-    elif timesSeen == 2 and isLivePhoto:  # makes sense, just skip
+    elif times == 2 and isLive:  # makes sense, just skip
         return True
     else:  # if saw twice and is not live or saw 3 or more times, doesn't make sense. crash
         return False
@@ -77,12 +75,13 @@ def removeMediaFromDiskAndDatabase(rowId):
     absoluteFilename = row.absoluteFilename
     absoluteFilenameSplit = absoluteFilename.split(os.path.sep)
     filename = absoluteFilenameSplit[-1]
-    directory = os.path.sep.join(absoluteFilenameSplit[0:-1])
+    albumDirectory = os.path.sep.join(absoluteFilenameSplit[0:-1])
+    baseDirectory = os.path.sep.join(absoluteFilenameSplit[0:-2])
 
     # remove symlink in homogeneous content directory (e.g. 0nly_images)
     hContentDirName = VIDEO_SOFT_LINK_DIR_NAME if row.isVideo else IMAGE_SOFT_LINK_DIR_NAME
     absoluteHSoftLink = pathlib.Path(ABS_FILENAME.format(
-        dir=ABS_FILENAME.format(dir=directory, filename=hContentDirName),
+        dir=ABS_FILENAME.format(dir=albumDirectory, filename=hContentDirName),
         filename=filename
     ))
     if absoluteHSoftLink.is_symlink():
@@ -90,7 +89,7 @@ def removeMediaFromDiskAndDatabase(rowId):
 
     # remove symlink in favorites directory
     absoluteFavoriteLink = pathlib.Path(ABS_FILENAME.format(
-        dir=ABS_FILENAME.format(dir=directory, filename=FAVORITES_DIR_NAME),
+        dir=ABS_FILENAME.format(dir=baseDirectory, filename=FAVORITES_DIR_NAME),
         filename=filename
     ))
     if absoluteFavoriteLink.is_symlink():
@@ -132,8 +131,8 @@ def getTimestamps():
         if times == 1 and isLivePhoto:
             removeMediaFromDiskAndDatabase(rowId)
 
-    ret = {k: mapTimesSeenToBool(v) for k, v in timesSeen.items()}
-    return jsonify(ret)
+    ret = {k: mapTimesSeenToBool(times, isLive) for k, [times, isLive, _] in timesSeen.items()}
+    return jsonify({k: v for k, v in ret.items() if v is not None})
 
 def getChunkFilename(tmpUuid, chunkNum):
     return FILE_PART_NAME.format(dir=FILE_PARTS_DIR, tmpUuid=tmpUuid, chunkNum=chunkNum)
@@ -255,12 +254,13 @@ def processSaveJson(body):
         homogeneousContentSymLinkPath = getFilenames(rowDict, album, fileExtension)
     rowDict['absoluteFilename'] = absPath
 
-    # validate the metadata
+    # validate the metadata then make the MediaMetadata object
     if (not models.MediaMetadata.validate(rowDict)):
         errMsg = 'Metadata validation failed: {}'.format(rowDict)
         raise Exception(errMsg)
+    row = models.MediaMetadata.fromDict(rowDict)
 
-    return numParts, tmpUuid, rowDict, absFavePath, directory, faveDirectory,\
+    return numParts, tmpUuid, row, absFavePath, directory, faveDirectory,\
         homogeneousContentDirectory, homogeneousContentSymLinkPath
 
 @app.route('/save', methods=['POST'])
@@ -270,7 +270,7 @@ def combinePartsAndSave():
 
     # process and validate json body
     try:
-        numParts, tmpUuid, rowDict, absFavePath, directory, faveDirectory,\
+        numParts, tmpUuid, row, absFavePath, directory, faveDirectory,\
             homogeneousContentDirectory, homogeneousContentSymLinkPath = processSaveJson(body)
     except Exception as err:
         print (err)
@@ -289,7 +289,7 @@ def combinePartsAndSave():
         # combine file parts and store results in album directory
         if not pathlib.Path(directory).is_dir():
             os.mkdir(directory)
-        with open(rowDict.get('absoluteFilename'), 'wb') as wfd:
+        with open(row.absoluteFilename, 'wb') as wfd:
             for f in filePartsArr:
                 with open(f, 'rb') as fd:
                     shutil.copyfileobj(fd, wfd)
@@ -301,17 +301,16 @@ def combinePartsAndSave():
         # make soft link in favorites directory if it's a favorite
         if not pathlib.Path(faveDirectory).is_dir():
             os.mkdir(faveDirectory)
-        if rowDict.get('isFavorite'):
-            os.symlink(rowDict.get('absoluteFilename'), absFavePath)
+        if row.isFavorite:
+            os.symlink(row.absoluteFilename, absFavePath)
 
         # make soft link in homogeneous content directory
         if not pathlib.Path(homogeneousContentDirectory).is_dir():
             os.mkdir(homogeneousContentDirectory)
-        if not rowDict['isLivePhoto']:
-            os.symlink(rowDict.get('absoluteFilename'), homogeneousContentSymLinkPath)
+        if (not row.isLivePhoto) or (row.isLivePhoto and (not row.isVideo)):
+            os.symlink(row.absoluteFilename, homogeneousContentSymLinkPath)
 
         # put a metadata row in the DB
-        row = models.MediaMetadata.fromDict(rowDict)
         db.session.add(row)
         db.session.commit()
 
