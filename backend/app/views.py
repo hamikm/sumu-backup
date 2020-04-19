@@ -22,9 +22,6 @@ FILE_PARTS_DIR='tmp'
 FILE_PART_NAME = '{dir}' + os.path.sep + '{tmpUuid}_{chunkNum}'
 ABS_FILENAME = '{dir}' + os.path.sep + '{filename}'
 FAVORITES_DIR_NAME = 'favorites'
-SOFT_LINK_DIR = '{dir}' + os.path.sep + '{softDir}'
-VIDEO_SOFT_LINK_DIR_NAME = '0nly_videos'
-IMAGE_SOFT_LINK_DIR_NAME = '0nly_images'
 
 def makeError(statusCode, msg=''):
     ret = jsonify({
@@ -78,22 +75,13 @@ def removeMediaFromDiskAndDatabase(rowId):
     albumDirectory = os.path.sep.join(absoluteFilenameSplit[0:-1])
     baseDirectory = os.path.sep.join(absoluteFilenameSplit[0:-2])
 
-    # remove symlink in homogeneous content directory (e.g. 0nly_images)
-    hContentDirName = VIDEO_SOFT_LINK_DIR_NAME if row.isVideo else IMAGE_SOFT_LINK_DIR_NAME
-    absoluteHSoftLink = pathlib.Path(ABS_FILENAME.format(
-        dir=ABS_FILENAME.format(dir=albumDirectory, filename=hContentDirName),
-        filename=filename
-    ))
-    if absoluteHSoftLink.is_symlink():
-        absoluteHSoftLink.unlink()
-
-    # remove symlink in favorites directory
-    absoluteFavoriteLink = pathlib.Path(ABS_FILENAME.format(
+    # remove file in favorites directory
+    absoluteFavoritePath = pathlib.Path(ABS_FILENAME.format(
         dir=ABS_FILENAME.format(dir=baseDirectory, filename=FAVORITES_DIR_NAME),
         filename=filename
     ))
-    if absoluteFavoriteLink.is_symlink():
-        absoluteFavoriteLink.unlink()
+    if absoluteFavoritePath.exists():
+        absoluteFavoritePath.unlink()
 
     # remove actual file
     absolutePath = pathlib.Path(absoluteFilename)
@@ -205,14 +193,7 @@ def getFilenames(rowDict, album, fileExtension):
         dir=faveDirectory,
         filename=relativeFilename
     )
-    softDirectory = VIDEO_SOFT_LINK_DIR_NAME if rowDict['isVideo'] else IMAGE_SOFT_LINK_DIR_NAME
-    homogeneousContentDirectory = SOFT_LINK_DIR.format(dir=directory, softDir=softDirectory)
-    homogeneousContentSymLinkPath = ABS_FILENAME.format(
-        dir=homogeneousContentDirectory,
-        filename=relativeFilename
-    )
-    return absPath, absFavePath, directory, faveDirectory,\
-        homogeneousContentDirectory, homogeneousContentSymLinkPath
+    return absPath, absFavePath, directory, faveDirectory
 
 def processSaveJson(body):
     if body.get('p') != PW:
@@ -250,8 +231,7 @@ def processSaveJson(body):
         'isVideo': body.get('v'),
         'isLivePhoto': body.get('l')
     }
-    absPath, absFavePath, directory, faveDirectory, homogeneousContentDirectory,\
-        homogeneousContentSymLinkPath = getFilenames(rowDict, album, fileExtension)
+    absPath, absFavePath, directory, faveDirectory = getFilenames(rowDict, album, fileExtension)
     rowDict['absoluteFilename'] = absPath
 
     # validate the metadata then make the MediaMetadata object
@@ -260,8 +240,7 @@ def processSaveJson(body):
         raise Exception(errMsg)
     row = models.MediaMetadata.fromDict(rowDict)
 
-    return numParts, tmpUuid, row, absFavePath, directory, faveDirectory,\
-        homogeneousContentDirectory, homogeneousContentSymLinkPath
+    return numParts, tmpUuid, row, absFavePath, directory, faveDirectory
 
 @app.route('/save', methods=['POST'])
 def combinePartsAndSave():
@@ -270,8 +249,7 @@ def combinePartsAndSave():
 
     # process and validate json body
     try:
-        numParts, tmpUuid, row, absFavePath, directory, faveDirectory,\
-            homogeneousContentDirectory, homogeneousContentSymLinkPath = processSaveJson(body)
+        numParts, tmpUuid, row, absFavePath, directory, faveDirectory = processSaveJson(body)
     except Exception as err:
         print (err)
         return makeError(500, str(err))
@@ -298,17 +276,11 @@ def combinePartsAndSave():
         for filename in filePartsArr:
             os.remove(filename)
 
-        # make soft link in favorites directory if it's a favorite
+        # copy into favorites directory if it's a favorite
         if not pathlib.Path(faveDirectory).is_dir():
             os.mkdir(faveDirectory)
         if row.isFavorite:
-            os.symlink(row.absoluteFilename, absFavePath)
-
-        # make soft link in homogeneous content directory
-        if not pathlib.Path(homogeneousContentDirectory).is_dir():
-            os.mkdir(homogeneousContentDirectory)
-        if (not row.isLivePhoto) or (row.isLivePhoto and (not row.isVideo)):
-            os.symlink(row.absoluteFilename, homogeneousContentSymLinkPath)
+            shutil.copyfile(row.absoluteFilename, absFavePath)
 
         # put a metadata row in the DB
         db.session.add(row)
