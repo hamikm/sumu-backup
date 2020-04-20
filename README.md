@@ -47,4 +47,7 @@ You need `python3` and `pip3`. You might want Plex too!
 #### Album details
 The frontend might decide to put images and videos in the same album directory. In fact, if an album name isn't given for a certain image or video, it defaults to the year and month in which it was taken, like `YY-MM`. That means that images and videos will often be mixed together. Live photos are uploaded as an image and a short video, and they're both stored in the same album.
 
-Favorites are _copied_ instead of soft-linked to a special `favorites` album. Plex can't handle soft links; as of early 2020, its browser will show link targets but not sources. The expected behavior, of course, is showing both.
+Favorites are _copied_ instead of soft-linked to a special `favorites` album. Plex can't handle soft links; as of early 2020, its browser will show link targets but not sources. The expected behavior, of course, is to show both.
+
+#### Backups
+Consider periodic backups to a cloud provider. In addition to redundancy, they make it easy to migrate to a new RAID array. I run `aws s3 sync . s3://<bucket name> --storage-class DEEP_ARCHIVE` in my backup directory.
