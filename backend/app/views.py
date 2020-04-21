@@ -72,7 +72,6 @@ def removeMediaFromDiskAndDatabase(rowId):
     absoluteFilename = row.absoluteFilename
     absoluteFilenameSplit = absoluteFilename.split(os.path.sep)
     filename = absoluteFilenameSplit[-1]
-    albumDirectory = os.path.sep.join(absoluteFilenameSplit[0:-1])
     baseDirectory = os.path.sep.join(absoluteFilenameSplit[0:-2])
 
     # remove file in favorites directory
