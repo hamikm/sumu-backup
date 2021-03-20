@@ -5,7 +5,7 @@ Flask-SQLAlchemy==2.4.1
 gevent==1.4.0
 greenlet==0.4.15
 itsdangerous==1.1.0
-Jinja2==2.11.1
+Jinja2==2.11.3
 MarkupSafe==1.1.1
 pbr==5.4.5
 six==1.14.0
